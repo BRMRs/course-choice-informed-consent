@@ -49,7 +49,7 @@ export const COURSES = [
     id: 'visualization', code: 'DES2201', name: '信息可视化设计',
     department: '设计学院', category: '公共选修', teacher: '沈亦宁',
     credits: 2, capacity: 48, enrolled: 39, fit: 89,
-    room: '设计楼 201', day: 3, start: 5, duration: 2, weeks: '1—16周',
+    room: '设计楼 201', day: 3, start: 3, duration: 2, weeks: '1—16周',
     description: '结合视觉编码与叙事方法，将公开数据转化为清晰可读的图表和交互原型。',
     syllabus: ['视觉编码与图表选择', '数据叙事与版面组织', '交互可视化原型评议'],
     assessment: '图表练习30%，设计项目50%，同伴评议20%。',
