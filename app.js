@@ -1,5 +1,5 @@
-import { COURSES, getCourse, filterCourses, conflicts } from './catalog.mjs';
-import { createState, transition, restoreState, planSummary, REASONS, MIN_CREDITS, MAX_CREDITS } from './state.mjs';
+import { COURSES, getCourse, filterCourses, conflicts } from './catalog.mjs?v=2';
+import { createState, transition, restoreState, planSummary, REASONS, MIN_CREDITS, MAX_CREDITS } from './state.mjs?v=2';
 
 const STORAGE_KEY = 'mingli-selection-workbench-v2';
 const SOURCE = 'https://github.com/BRMRs/course-choice-informed-consent';
@@ -50,12 +50,16 @@ function save() {
   } catch { storageError = '浏览器未能保存进度，请保持当前页面打开。'; }
 }
 function act(action) {
+  if (!state.pending && ['ADD', 'DROP', 'REVIEW'].includes(action.type)) {
+    const source = document.activeElement;
+    returnFocus = source?.matches('[data-action]') ? { action: source.dataset.action, course: source.dataset.course } : null;
+  }
   const requested = { ...action, at: Date.now() };
   if (action.type === 'SUBMIT') requested.expectedCourses = [...(state.review || [])];
   const execute = () => {
     refreshSaved();
     state = transition(state, requested);
-    save(); render();
+    save(); render(true);
   };
   actionQueue = actionQueue.then(() => useSharedStorage
     ? navigator.locks.request(STORAGE_KEY, { mode: 'exclusive' }, execute)
@@ -169,10 +173,15 @@ function closeButton() { return `<button type="button" class="icon-button" data-
 function setDialog(html, className = '') {
   const opening = !dialog.open;
   const oldFocus = document.activeElement;
-  if (opening) returnFocus = oldFocus?.matches('[data-action]') ? { action: oldFocus.dataset.action, course: oldFocus.dataset.course } : null;
+  if (opening && !returnFocus) returnFocus = oldFocus?.matches('[data-action]') ? { action: oldFocus.dataset.action, course: oldFocus.dataset.course } : null;
   cancelHold();
   dialog.className = className;
   dialog.innerHTML = html;
+  if (state.pending === 'review' && state.notice) {
+    const notice = document.createElement('div');
+    notice.className = 'alert warning'; notice.setAttribute('role', 'status'); notice.textContent = state.notice;
+    dialog.querySelector('.dialog-heading').after(notice);
+  }
   if (!dialog.open) dialog.showModal();
   setupHold();
   if (!opening && dialog.contains(document.activeElement) === false) {
@@ -188,7 +197,7 @@ function closeDialog() {
     const target = candidates.find(node => node.dataset.course === returnFocus.course);
     (target || document.querySelector('h1'))?.focus({ preventScroll: true });
     returnFocus = null;
-  }
+  } else document.querySelector('h1')?.focus({ preventScroll: true });
 }
 function procedureDialog() {
   dialogKind = { type: 'procedure' };
@@ -209,13 +218,27 @@ function procedureDialog() {
   }
 }
 
-function render() {
+function captureInputs() {
+  return [...document.querySelectorAll('#filter-form input, #filter-form select, #reason-form input, #answer-form input')].map(node => ({ name: node.name, value: node.value, checked: node.checked }));
+}
+function restoreInputs(inputs) {
+  for (const saved of inputs) {
+    for (const input of document.querySelectorAll('#filter-form input, #filter-form select, #reason-form input, #answer-form input')) {
+      if (input.name !== saved.name) continue;
+      if (input.type === 'radio' || input.type === 'checkbox') { if (input.value === saved.value) input.checked = saved.checked; }
+      else input.value = saved.value;
+    }
+  }
+}
+function render(preserveInputs = false) {
+  const inputs = preserveInputs ? captureInputs() : [];
   const focusedId = document.activeElement?.id;
   const { page } = route();
   app.innerHTML = shell(({ courses: coursesPage, timetable: timetablePage, results: resultsPage })[page]());
   if (state.pending) procedureDialog();
   else if (dialogKind?.type === 'procedure') closeDialog();
   else if (dialogKind?.type === 'detail') courseDetails(dialogKind.id);
+  restoreInputs(inputs);
   if (focusedId && document.getElementById(focusedId)) document.getElementById(focusedId).focus({ preventScroll: true });
 }
 
@@ -301,15 +324,7 @@ dialog.addEventListener('close', () => { if (!suppressDialogClose && !dialog.ope
 window.addEventListener('hashchange', () => { closeDialog(); render(); window.scrollTo(0, 0); document.querySelector('h1')?.focus({ preventScroll: true }); });
 window.addEventListener('storage', e => {
   if (!useSharedStorage || e.key !== STORAGE_KEY || !e.newValue) return;
-  const inputs = [...document.querySelectorAll('#filter-form input, #filter-form select, #reason-form input, #answer-form input')].map(node => ({ name: node.name, value: node.value, checked: node.checked }));
-  refreshSaved(); render();
-  for (const saved of inputs) {
-    for (const input of document.querySelectorAll('#filter-form input, #filter-form select, #reason-form input, #answer-form input')) {
-      if (input.name !== saved.name) continue;
-      if (input.type === 'radio' || input.type === 'checkbox') { if (input.value === saved.value) input.checked = saved.checked; }
-      else input.value = saved.value;
-    }
-  }
+  refreshSaved(); render(true);
 });
 if (!location.hash) history.replaceState(null, '', '#/courses');
 render();

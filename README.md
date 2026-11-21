@@ -39,6 +39,7 @@ npm test
 
 - [本轮重做基线](docs/workbench-redesign.md)
 - [原始PRD及其覆盖说明](docs/PRD.md)
-- [发布验证记录](docs/release-check.md)
+- [v2 工作台验证记录](docs/workbench-verification.md)
+- [v1 历史发布记录](docs/release-check.md)
 - [重做 Issue #4](https://github.com/BRMRs/course-choice-informed-consent/issues/4)
 - v1 状态探索保留在 [prototype/consent-state-model](https://github.com/BRMRs/course-choice-informed-consent/tree/prototype/consent-state-model) 分支，未混入主应用。

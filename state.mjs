@@ -1,4 +1,4 @@
-import { COURSES, getCourse, conflicts, totalCredits } from './catalog.mjs';
+import { COURSES, getCourse, conflicts, totalCredits } from './catalog.mjs?v=2';
 
 export const MIN_CREDITS = 3;
 export const MAX_CREDITS = 12;
