@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>选课知情拒绝 · 状态原型</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;color:#223047;background:#f5f7fa;line-height:1.65;font-size:15px;--blue:#245caa}*{box-sizing:border-box}body{margin:0}main{max-width:1100px;margin:auto;padding:40px 24px 60px}h1{font-size:29px;letter-spacing:-.6px;margin:8px 0}h2{font-size:19px;margin:0 0 14px}h3{font-size:15px;margin:0 0 10px}p{margin:8px 0}.muted,small{color:#68758a}.eyebrow{font-size:12px;color:var(--blue);letter-spacing:2px}.intro{max-width:850px;margin-bottom:24px}.panel{background:white;border:1px solid #dce3ec;border-radius:12px;padding:22px;margin:16px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.state-group{border-top:1px solid #edf0f5;padding-top:14px}dl{display:grid;grid-template-columns:145px 1fr;margin:0;font-size:14px;gap:8px 12px}dt{color:#68758a}dd{margin:0;overflow-wrap:anywhere}.notice{border-left:3px solid var(--blue);background:#eff5fc;padding:12px 16px;margin:16px 0;overflow-wrap:anywhere}.tag{display:inline-block;border:1px solid #ccdaee;color:#245caa;border-radius:5px;padding:1px 7px;font-size:12px}.actions{display:flex;flex-wrap:wrap;gap:8px}button,input,select{font:inherit}button{border:1px solid #cfdae8;background:#fff;color:#244a7e;border-radius:7px;padding:8px 12px;cursor:pointer;line-height:1.4}button:hover{background:#eff5fc}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #98b8ec;outline-offset:2px}button.primary,button[aria-selected=true]{background:var(--blue);color:#fff;border-color:var(--blue)}button:disabled{cursor:default;opacity:.48}input,select{border:1px solid #cfdae8;padding:7px;border-radius:6px;max-width:100%;background:white;color:#223047}.field{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}.action-group{margin:18px 0}.action-group p{font-size:13px;color:#68758a}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.steps{list-style:none;padding:0;margin:12px 0}.steps li{display:flex;gap:12px;align-items:center;border-top:1px solid #edf0f5;padding:10px 0}.step-number{color:#68758a;width:22px;flex-shrink:0}.steps small{display:block}.step-content{flex:1}.steps button{min-width:100px}.log{max-height:260px;overflow:auto;font-size:13px;padding-left:24px}.log li{padding:6px;border-bottom:1px solid #edf0f5}.course{padding:8px 0;border-bottom:1px solid #edf0f5}.hold{touch-action:none;user-select:none;-webkit-user-select:none}.footer{font-size:12px;color:#68758a}details summary{cursor:pointer;color:var(--blue)}@media(max-width:720px){main{padding:24px 14px}.grid{grid-template-columns:1fr}.panel{padding:16px}dl{grid-template-columns:125px 1fr}h1{font-size:24px}.steps li{align-items:flex-start}.steps button{min-width:85px;max-width:145px}}
+</style>
+</head>
+<body><main>
+<header class="intro"><span class="eyebrow">明理大学 / 一次性逻辑原型</span><h1>拒绝被记录，选择能否兑现？</h1><p>验证选课状态模型：知情拒绝后记录保留；首次加入《机器学习》自动加入一次保障课；移除后不回填；最终准确提交仅《机器学习》，重复提交返回同一回执。</p><p class="muted">这是可丢弃的状态演示，不是真实教务系统。全部状态仅在本页内存中，刷新即清空。长按使用真实两秒；其余操作即时生效。</p></header>
+<section class="panel" aria-labelledby="state-title"><h2 id="state-title">当前业务状态</h2><div id="feedback" class="notice" role="status" aria-live="polite"></div><div id="state" class="grid"></div></section>
+<section class="panel"><h2>自由操作</h2><p class="muted">所有动作始终可点。可以乱序尝试；不满足条件时保留已有进度并解释原因。自由操作会退出当前引导。</p>
+<div class="action-group"><h3>1 · 查找与办理</h3><div class="field"><label for="query">搜索词</label><input id="query" value="机器学习"><button data-action="SEARCH">搜索课程</button></div><div class="actions"><button data-action="TARGET">打开目标课</button><button data-action="READ">已读完课程简介</button></div><p>简介：农业数据采集获取土壤湿度、温度等环境数据；通过传感器采集；重点推荐课不属于本轮必选课。</p><div class="field"><label for="reason">原始拒绝理由</label><select id="reason"><option>不感兴趣</option><option>与学习计划不符</option><option>时间安排不合适</option></select><button data-action="REASON">保存拒绝理由</button></div><div class="actions"><button data-action="RESPONSE">已读系统回应</button><button data-action="QUIZ_WRONG">答题：校车班次</button><button data-action="QUIZ_RIGHT">答题：土壤湿度、温度等环境数据</button><button data-action="REFUSE">确认知情拒绝</button></div></div>
+<div class="action-group"><h3>2 · 课程与保障席位</h3><div class="actions"><button data-action="ADD">加入机器学习</button><button data-action="REMOVE_TARGET">移除机器学习</button><button data-action="WAIVE">勾选放弃保障声明</button><button data-action="UNWAIVE">取消放弃声明</button><button class="hold" id="free-hold">按住两秒，移除保障课</button><button data-action="HOLD_START">开始长按计时</button><button data-action="HOLD_CANCEL">中断长按</button><button data-action="HOLD_END">确认长按结果</button></div><p>声明：我理解可以继续选机器学习，仍选择放弃此席位。也可用“开始 / 中断 / 确认”三个动作查看长按的中间状态；不足两秒不会移除。</p></div>
+<div class="action-group"><h3>3 · 核对与提交</h3><div class="actions"><button data-action="ADVICE">查看成长建议</button><button data-action="BACK">返回待提交课表</button><button data-action="REVIEW">按当前方案核对</button><button data-action="SUBMIT">提交选课</button><button data-action="RESET">重新开始（清空本页）</button></div></div>
+</section>
+<section class="panel"><h2>按步骤走一遍</h2><div class="tabs" role="tablist" aria-label="引导场景"><button id="tab-success" role="tab" aria-controls="walkthrough" data-tab="success">成功路径</button><button id="tab-illegal" role="tab" aria-controls="walkthrough" data-tab="illegal">非法操作</button><button id="tab-repeat" role="tab" aria-controls="walkthrough" data-tab="repeat">重复操作</button></div><div id="walkthrough" role="tabpanel"></div></section>
+<section class="panel"><h2>实际操作记录</h2><p class="muted">每次业务动作计一次尝试，包含被拒绝和重复动作；长按进度帧不计。重置后重新计数。</p><ol id="events" class="log"></ol></section><p class="footer">边界：此页验证状态转换和回执一致性，不验证刷新恢复、部署、真实教务或完整产品界面。</p>
+</main>
+<script>
+// Portable pure domain logic. Time and receipt metadata are supplied by the caller.
+const ConsentModel = (() => {
+ const ML='ml', GUARANTEE='agriculture';
+ const initial=()=>({version:1,step:'任务与搜索',query:'',searches:0,read:false,reason:'',responseRead:false,quizAttempts:0,lastAnswer:'',quizPassed:false,refused:false,unlocked:false,cart:[],guaranteeEverAdded:false,guaranteeRemoved:false,waiver:false,holdStartedAt:null,review:null,receipt:null,events:[],message:'尚未办理。可以自由操作，也可以从下方选择引导。'});
+ const exact=cart=>cart.length===1 && cart[0]===ML;
+ function reducer(state,action){
+  if(action.type==='RESET') return initial();
+  let s={...state,cart:[...state.cart]},message='',outcome='完成';
+  const reject=m=>{message=m;outcome='未满足条件';};
+  const repeat=m=>{message=m;outcome='重复，无新增结果';};
+  const changed=()=>{s.review=null;s.holdStartedAt=null;};
+  if(s.receipt && !['SUBMIT','BACK','ADVICE','TARGET','SEARCH'].includes(action.type)) reject('已生成回执，本次课程与办理记录已锁定。可返回查看或重新开始。');
+  else switch(action.type){
+   case 'SEARCH':s.query=action.query.trim();s.step='搜索结果';if(s.query==='')reject('请输入搜索词；已完成进度不变。');else if(!s.query.includes('机器学习'))reject('未找到匹配课程。可搜索“机器学习”；已完成进度不变。');else{s.searches++;message='目标完全匹配，按综合适配度排第四；已有办理记录保留。';}break;
+   case 'TARGET':s.step=s.unlocked?'目标课程详情':'知情拒绝办理';message=s.unlocked?'目标课已解锁，可以加入。':'目标课尚未解锁，已转到知情拒绝办理：阅读 → 理由 → 系统回应 → 答题 → 确认。';break;
+   case 'READ':if(s.read)repeat('已读记录保留，无需重读。');else{s.read=true;s.step='知情拒绝办理';message='课程简介已读完。下一步选择拒绝理由。';}break;
+   case 'REASON':if(!s.read)reject('请先读完课程简介。');else if(s.refused)repeat('知情拒绝已完成，原始理由保持不变。');else if(!['不感兴趣','与学习计划不符','时间安排不合适'].includes(action.reason))reject('请选择一个有效理由。');else if(s.reason===action.reason)repeat('该理由已保存。');else{s.reason=action.reason;s.responseRead=false;message='按原意记录理由：“'+s.reason+'”。请阅读系统回应。';}break;
+   case 'RESPONSE':if(!s.reason)reject('请先保存拒绝理由。');else if(s.responseRead)repeat('系统回应已读记录保留。');else{s.responseRead=true;message='尚未建立兴趣，不代表课程不适合你。请先证明你理解将放弃的成长机会。';}break;
+   case 'QUIZ_WRONG':case 'QUIZ_RIGHT':if(!s.responseRead)reject('请先完成阅读、选择理由并阅读系统回应。');else if(s.quizPassed)repeat('测验已通过，不会因再次作答而失效。');else{s.quizAttempts++;s.lastAnswer=action.type==='QUIZ_RIGHT'?'土壤湿度、温度等环境数据':'校车班次';s.quizPassed=action.type==='QUIZ_RIGHT';message=s.quizPassed?'回答正确。现在可确认知情拒绝。':'回答不正确。简介说明：采集土壤湿度、温度等环境数据。可直接重试，之前的进度保留。';}break;
+   case 'REFUSE':if(s.refused)repeat('已记录知情拒绝，目标课仍保持解锁。');else if(!s.read||!s.reason||!s.responseRead||!s.quizPassed)reject('知情拒绝尚未满足条件：需读完简介、保存理由、阅读回应并通过测验。');else{s.refused=true;s.unlocked=true;message='知情拒绝已记录，原始理由保留；机器学习永久解锁。';}break;
+   case 'ADD':if(!s.unlocked)reject('加入失败：请先完成重点推荐课的知情拒绝。');else if(s.cart.includes(ML))repeat('机器学习已在课表中；不新增课程，也不回填保障课。');else{s.cart.push(ML);changed();s.step='待提交课表';if(!s.guaranteeEverAdded){s.cart.push(GUARANTEE);s.guaranteeEverAdded=true;message='新增两门：机器学习 + 农业数据采集基础（系统保障课，尚未提交）。你的拒绝记录仍有效。';}else message='已加入机器学习；保障席位曾加入过，本次不回填。';}break;
+   case 'REMOVE_TARGET':if(!s.cart.includes(ML))repeat('课表中没有机器学习，无需移除。');else{s.cart=s.cart.filter(id=>id!==ML);changed();message='机器学习已移除，原核对快照失效。再次加入不会再补保障课。';}break;
+   case 'WAIVE':if(!s.cart.includes(GUARANTEE))reject('当前没有待放弃的保障席位。');else if(s.waiver)repeat('放弃保障声明已勾选。');else{s.waiver=true;message='已勾选声明。请按住两秒确认放弃保障。';}break;
+   case 'UNWAIVE':s.waiver=false;s.holdStartedAt=null;message='声明已取消，当前长按同时中断。';break;
+   case 'HOLD_START':if(!s.cart.includes(GUARANTEE))reject('没有可移除的保障席位。');else if(!s.waiver)reject('请先勾选放弃保障声明。');else if(s.holdStartedAt!==null)repeat('正在计时，不重新开始。');else{s.holdStartedAt=action.now;message='正在长按；满两秒才能移除保障课。';}break;
+   case 'HOLD_CANCEL':s.holdStartedAt=null;message='本次长按已中断；放弃声明与拒绝记录均保留。';break;
+   case 'HOLD_END':if(!s.cart.includes(GUARANTEE)){if(s.guaranteeRemoved)repeat('保障课已经移除，不产生第二次移除。');else reject('保障课尚未加入。');}else if(!s.waiver||s.holdStartedAt===null)reject('请先勾选声明并开始长按。');else if(action.now-s.holdStartedAt<2000){s.holdStartedAt=null;reject('长按不足两秒，保障课未移除；声明保留。');}else{s.cart=s.cart.filter(id=>id!==GUARANTEE);s.guaranteeRemoved=true;changed();message='保障课已移除。只剩机器学习，提交条件已满足；培养完整度仍为78%。';}break;
+   case 'ADVICE':s.step='成长建议';message='剩余22%来自未保留跨学科保障建议，不代表学分或提交资格不足。返回不重锁、不补课。';break;
+   case 'BACK':s.step='待提交课表';message='已返回课表，拒绝、解锁、保障移除和回执状态全部保留。';break;
+   case 'REVIEW':if(!exact(s.cart))reject('本原型验证仅提交机器学习：请保留目标课并移除保障课后核对。');else{s.review=[...s.cart];s.step='最终核对';message='已核对：仅机器学习，3学分，共1门。课程有变化须重新核对。';}break;
+   case 'SUBMIT':if(s.receipt){s.step='成功回执';repeat('重复提交返回同一回执：'+s.receipt.id+'。编号、时间与课程快照均不变。');}else if(!s.review||!exact(s.cart)||s.review.join('|')!==s.cart.join('|'))reject('不能提交：需先核对当前仅含机器学习的课表，课程变更后必须重新核对。');else{s.receipt={id:action.receiptId,time:action.submittedAt,courses:[...s.review],credits:3};s.step='成功回执';message='本次演示选课成功：回执仅包含机器学习，3学分。';}break;
+   default:reject('未知操作，业务状态未改变。');
+  }
+  s.message=message;s.events=[...state.events,{number:state.events.length+1,action:action.type,outcome,message}];return s;
+ }
+ return {initial,reducer,exact};
+})();
+</script>
+<script>
+const $=id=>document.getElementById(id), escapeHTML=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const courseName=id=>id==='ml'?'机器学习':'农业数据采集基础（系统保障课）';
+const names={SEARCH:'搜索课程',TARGET:'打开目标课',READ:'读完简介',REASON:'保存拒绝理由',RESPONSE:'阅读系统回应',QUIZ_WRONG:'答错测验',QUIZ_RIGHT:'答对测验',REFUSE:'确认知情拒绝',ADD:'加入机器学习',REMOVE_TARGET:'移除机器学习',WAIVE:'勾选放弃声明',UNWAIVE:'取消放弃声明',HOLD_START:'开始长按',HOLD_CANCEL:'中断长按',HOLD_END:'确认长按结果',ADVICE:'查看成长建议',BACK:'返回课表',REVIEW:'核对课程',SUBMIT:'提交选课'};
+const step=(action,note)=>({action,note});
+const preparation=[step('SEARCH','目标完全匹配却排第四。'),step('TARGET','未解锁时进入拒绝办理。'),step('READ','简介包含正确答案。'),step('REASON','原始理由：不感兴趣。'),step('RESPONSE','读完回应后可以答题。'),step('QUIZ_RIGHT','通过后再确认拒绝。'),step('REFUSE','拒绝记录与目标解锁同时成立。')];
+const scenarios={
+ success:{title:'成功：把选择准确带到回执',description:'从初始状态完成知情拒绝，观察已拒绝课程仍被自动加入；长按移除后，以78%的完整度提交唯一目标课。',steps:[...preparation,step('ADD','新增两门；拒绝记录仍然保留。'),step('WAIVE','勾选后才能长按。'),step('HOLD','按住两秒；提前松开可重试本步。'),step('ADVICE','合规与完整度独立。'),step('BACK','返回不会重锁、补课。'),step('REVIEW','核对快照只有机器学习。'),step('SUBMIT','回执准确保存1门、3学分。')]},
+ illegal:{title:'非法：乱序、答错与过早提交',description:'故意跳过前置条件、答错、缺少声明、短按和未核对提交。被拒绝的动作不会清空已完成进度；还会验证课程变更使核对失效。',steps:[step('ADD','应阻止：尚未解锁。'),step('SUBMIT','应阻止：尚未核对。'),step('REFUSE','应阻止：拒绝条件未完成。'),step('READ','建立阅读进度。'),step('REASON','保存原始理由。'),step('RESPONSE','阅读系统回应。'),step('QUIZ_WRONG','答错但阅读与理由保留。'),step('REFUSE','应阻止：测验未通过。'),step('QUIZ_RIGHT','直接重试，无需重读。'),step('REFUSE','拒绝完成。'),step('ADD','一次性加入保障课。'),step('HOLD_START','应阻止：没有勾选声明。'),step('WAIVE','声明保留。'),step('HOLD_END','应阻止：未开始长按。'),step('REVIEW','应阻止：仍有保障课。'),step('HOLD','实际按住两秒移除；短按则保持本步。'),step('SUBMIT','应阻止：尚未核对。'),step('REVIEW','建立核对快照。'),step('REMOVE_TARGET','课程变化，核对立即失效。'),step('ADD','重新加入，不补保障课。'),step('SUBMIT','应阻止：需要重新核对。'),step('REVIEW','重新核对当前课表。'),step('SUBMIT','最终成功，仅机器学习。')]},
+ repeat:{title:'重复：业务结果只发生一次',description:'重复拒绝、加入、移除与提交。观察课程不重复、保障课不回填，回执编号和时间始终不变；操作尝试仍如实计数。',steps:[...preparation,step('REFUSE','重复拒绝不改理由或解锁状态。'),step('ADD','首次加入两门。'),step('ADD','重复加入不产生第三行。'),step('WAIVE','勾选声明。'),step('HOLD','长按移除保障课。'),step('HOLD_END','重复移除，无第二次结果。'),step('ADD','保障课不会回填。'),step('SEARCH','重新搜索不清空进度。'),step('REVIEW','准确核对唯一课程。'),step('SUBMIT','生成唯一回执。'),step('SUBMIT','相同编号、时间、课程。'),step('BACK','返回不修改回执。'),step('SUBMIT','依然返回同一回执。'),step('ADD','成功后课程被冻结。')]}
+};
+let state=ConsentModel.initial(),selected='success',guided=false,cursor=0,holdTimer=null,progressTimer=null,holding=null;
+function fields(rows){return '<dl>'+rows.map(([a,b])=>'<dt>'+a+'</dt><dd>'+b+'</dd>').join('')+'</dl>';}
+function render(stateOnly=false){
+ $('feedback').textContent=state.message;
+ const receipt=state.receipt;
+ $('state').innerHTML=[
+ ['办理进度',fields([['数据版本',state.version],['当前所在',state.step],['最近搜索',escapeHTML(state.query||'未搜索')],['成功重排次数',state.searches],['搜索排序',state.searches?'农业数据采集基础 98% → 教育统计软件实践 94% → 专家系统发展史 91% → 机器学习 67%':'尚未展示']])],
+ ['知情拒绝记录',fields([['课程简介',state.read?'已读完':'未读完'],['原始拒绝理由',escapeHTML(state.reason||'尚未选择')],['系统回应',state.responseRead?'已读':'未读'],['测验尝试',state.quizAttempts+'次；'+(state.quizPassed?'已通过':'未通过')],['最近答案',state.lastAnswer||'未答题'],['知情拒绝',state.refused?'已完成，记录保留':'未完成'],['目标课',state.unlocked?'已永久解锁':'尚未解锁']])],
+ ['待提交课表与保障',fields([['当前课程',state.cart.length?state.cart.map(courseName).join('；'):'空课表'],['曾自动加入保障',state.guaranteeEverAdded?'是（最多一次）':'否'],['已移除保障',state.guaranteeRemoved?'是，不再回填':'否'],['放弃保障声明',state.waiver?'已勾选':'未勾选'],['长按状态',state.holdStartedAt===null?'未在计时':'正在计时（需满两秒）'],['本轮提交条件',state.cart.includes('ml')?'已满足（一门课即可）':'未满足，缺少目标课'],['培养完整度',ConsentModel.exact(state.cart)?'78% · 缺少22%的保障建议，不影响资格':state.cart.includes('agriculture')?'100% · 包含保障建议':'尚未形成目标方案']])],
+ ['核对与最终回执',fields([['核对快照',state.review?state.review.map(courseName).join('；')+' · 1门 / 3学分':'尚未核对或已因课程变更失效'],['回执编号',receipt?escapeHTML(receipt.id):'尚未生成'],['提交时间',receipt?escapeHTML(receipt.time):'尚未提交'],['回执课程',receipt?receipt.courses.map(courseName).join('；')+' · '+receipt.courses.length+'门 / '+receipt.credits+'学分':'尚无快照'],['业务操作尝试',state.events.length+'次'],['拒绝完成次数',state.events.filter(e=>e.action==='REFUSE'&&e.outcome==='完成').length+'次'],['保障移除次数',state.events.filter(e=>e.action==='HOLD_END'&&e.outcome==='完成').length+'次'],['核对 / 提交尝试',state.events.filter(e=>e.action==='REVIEW').length+' / '+state.events.filter(e=>e.action==='SUBMIT').length]])]
+ ].map(([title,body])=>'<div class="state-group"><h3>'+title+'</h3>'+body+'</div>').join('');
+ $('events').innerHTML=state.events.length?state.events.map(e=>'<li><strong>'+e.number+'. '+escapeHTML(names[e.action]||e.action)+'</strong> · '+e.outcome+'<br>'+escapeHTML(e.message)+'</li>').join(''):'<li>暂无业务动作。</li>';
+ if(stateOnly)return;
+ document.querySelectorAll('[data-tab]').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.tab===selected));b.tabIndex=b.dataset.tab===selected?0:-1;});
+ const scene=scenarios[selected];$('walkthrough').setAttribute('aria-labelledby','tab-'+selected);
+ $('walkthrough').innerHTML='<h3>'+scene.title+'</h3><p class="muted">'+scene.description+'</p><button class="primary" id="start-guide">'+(guided?'从头开始此流程':'开始此流程（清空本页）')+'</button><p class="muted">'+(guided?(cursor===scene.steps.length?'本流程已走完，可对照上方状态与记录。':'当前第 '+(cursor+1)+' / '+scene.steps.length+' 步'):'开始后按顺序操作；切换场景会重置到初始状态。')+'</p><ol class="steps">'+scene.steps.map((s,i)=>'<li><span class="step-number">'+(i<cursor&&guided?'✓':i+1)+'</span><div class="step-content">'+(s.action==='HOLD'?'按住两秒，移除保障课':names[s.action])+'<small>'+s.note+'</small></div><button '+(s.action==='HOLD'?'class="hold" ':'')+'data-guide="'+i+'" '+(!guided||cursor!==i?'disabled':'')+'>'+(s.action==='HOLD'?'按住两秒':'执行此步')+'</button></li>').join('');
+ $('start-guide').onclick=startGuide;
+ document.querySelectorAll('[data-guide]').forEach(b=>{const i=Number(b.dataset.guide),a=scene.steps[i].action;if(a==='HOLD')bindHold(b,true);else b.onclick=()=>dispatch(a,true);});
+}
+function dispatch(type,fromGuide=false){
+ if(!fromGuide)guided=false;
+ state=ConsentModel.reducer(state,{type,query:fromGuide?'机器学习':$('query').value,reason:fromGuide?'不感兴趣':$('reason').value,now:performance.now(),receiptId:'DEMO-CONSENT-001',submittedAt:new Date().toLocaleString('zh-CN',{hour12:false})});
+ if(fromGuide&&guided&&scenarios[selected].steps[cursor]?.action===type)cursor++;
+ render();
+}
+function stopTimers(){clearTimeout(holdTimer);clearInterval(progressTimer);holdTimer=null;progressTimer=null;}
+function bindHold(button,fromGuide){
+ const start=e=>{
+  if(e.type==='keydown'&& ![' ','Enter'].includes(e.key))return;
+  if(e.type==='pointerdown'&&e.button!==0)return;
+  e.preventDefault();if(holding)return;
+  if(e.type==='pointerdown')button.setPointerCapture(e.pointerId);
+  if(!fromGuide)guided=false;
+  state=ConsentModel.reducer(state,{type:'HOLD_START',now:performance.now()});
+  if(state.holdStartedAt===null){render();return;}
+  holding={button,fromGuide};render(true);
+  progressTimer=setInterval(()=>{button.textContent='按住中 '+Math.min(100,Math.floor((performance.now()-state.holdStartedAt)/20))+'%';},60);
+  holdTimer=setTimeout(()=>{
+   stopTimers();holding=null;
+   state=ConsentModel.reducer(state,{type:'HOLD_END',now:performance.now()});
+   if(fromGuide&&state.guaranteeRemoved)cursor++;
+   render();button.textContent='按住两秒，移除保障课';
+  },2050);
+ };
+ const cancel=e=>{if(e.type==='keyup'&&![' ','Enter'].includes(e.key))return;if(!holding||holding.button!==button)return;stopTimers();holding=null;state=ConsentModel.reducer(state,{type:'HOLD_CANCEL'});button.textContent='按住两秒，移除保障课';render();};
+ button.onpointerdown=start;button.onpointerup=cancel;button.onpointercancel=cancel;button.onlostpointercapture=cancel;button.onkeydown=start;button.onkeyup=cancel;button.onblur=cancel;
+}
+function cancelActiveHold(){if(holding){stopTimers();holding.button.textContent='按住两秒，移除保障课';holding=null;state=ConsentModel.reducer(state,{type:'HOLD_CANCEL'});}}
+function startGuide(){cancelActiveHold();state=ConsentModel.initial();guided=true;cursor=0;render();}
+for(const button of document.querySelectorAll('[data-action]'))button.onclick=()=>{cancelActiveHold();dispatch(button.dataset.action);};
+for(const button of document.querySelectorAll('[data-tab]')){
+ button.onclick=()=>{selected=button.dataset.tab;startGuide();};
+ button.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const tabs=[...document.querySelectorAll('[data-tab]')];let i=tabs.indexOf(button);i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;tabs[i].click();tabs[i].focus();};
+}
+bindHold($('free-hold'),false);
+window.addEventListener('blur',()=>{if(holding){cancelActiveHold();render();}});
+render();
+</script>
+</body></html>
