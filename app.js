@@ -1,7 +1,12 @@
-import { COURSES, getCourse, filterCourses, conflicts } from './catalog.mjs?v=2';
-import { createState, transition, restoreState, planSummary, REASONS, MIN_CREDITS, MAX_CREDITS } from './state.mjs?v=2';
+import { COURSES, getCourse, filterCourses, conflicts } from './catalog.mjs?v=3';
+import { createState, transition, restoreState, planSummary, MIN_CREDITS, MAX_CREDITS, appealLength } from './state.mjs?v=3';
+import { getRoundId, roundStorageKey, createRoundUrl, getRoundLabel } from './rounds.mjs?v=3';
+import { procedureContent } from './procedures.mjs?v=3';
 
-const STORAGE_KEY = 'mingli-selection-workbench-v2';
+const roundId = getRoundId(location.href);
+const STORAGE_KEY = roundStorageKey(roundId);
+let roundLabel = getRoundLabel(roundId, 0);
+let roundCreatedAt = Date.now();
 const SOURCE = 'https://github.com/BRMRs/course-choice-informed-consent';
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#modal');
@@ -20,6 +25,7 @@ const useSharedStorage = Boolean(navigator.locks?.request);
 const recordStorage = {
   getItem: key => (useSharedStorage ? localStorage : sessionStorage).getItem(key),
   setItem: (key, value) => (useSharedStorage ? localStorage : sessionStorage).setItem(key, value),
+  keys: () => Object.keys(useSharedStorage ? localStorage : sessionStorage),
 };
 let actionQueue = Promise.resolve();
 let returnFocus = null;
@@ -29,11 +35,11 @@ function readSaved() {
   if (!saved) return null;
   const envelope = JSON.parse(saved);
   if (!Number.isSafeInteger(envelope.sequence) || envelope.sequence < 0) throw new TypeError('Invalid storage sequence');
-  return { sequence: envelope.sequence, state: restoreState(envelope.state) };
+  return { sequence: envelope.sequence, state: restoreState(envelope.state), label: envelope.label, createdAt: envelope.createdAt };
 }
 try {
   const saved = readSaved();
-  if (saved) { state = saved.state; storageSequence = saved.sequence; }
+  if (saved) { state = saved.state; storageSequence = saved.sequence; roundLabel = saved.label || roundLabel; roundCreatedAt = saved.createdAt || roundCreatedAt; }
 } catch { storageError = '本地记录暂时无法读取，本次可继续办理。'; }
 
 function refreshSaved() {
@@ -44,8 +50,9 @@ function refreshSaved() {
 }
 function save() {
   try {
-    storageSequence++;
-    recordStorage.setItem(STORAGE_KEY, JSON.stringify({ sequence: storageSequence, state }));
+    const nextSequence = storageSequence + 1;
+    recordStorage.setItem(STORAGE_KEY, JSON.stringify({ sequence: nextSequence, state, label: roundLabel, createdAt: roundCreatedAt, updatedAt: Date.now() }));
+    storageSequence = nextSequence;
     storageError = '';
   } catch { storageError = '浏览器未能保存进度，请保持当前页面打开。'; }
 }
@@ -82,6 +89,35 @@ function filters() {
   const { params } = route();
   return { query: params.get('q') || '', department: params.get('department') || 'all', category: params.get('category') || 'all', availableOnly: params.get('available') === '1', sort: params.get('sort') || 'fit' };
 }
+function roundRecords() {
+  const records = [];
+  try {
+    for (const key of recordStorage.keys().filter(key => key.startsWith('mingli-selection-workbench-v3:'))) {
+      try {
+        const envelope = JSON.parse(recordStorage.getItem(key));
+        const saved = restoreState(envelope.state);
+        records.push({ id: key.split(':')[1], label: envelope.label || '原始体验', updatedAt: envelope.updatedAt || 0, state: saved });
+      } catch { /* A damaged record must not hide the other rounds. */ }
+    }
+  } catch { /* The active session remains usable without storage. */ }
+  return records.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+function roundsDialog() {
+  dialogKind = { type: 'rounds' };
+  const records = roundRecords();
+  setDialog(`<div class="dialog-heading"><div><span class="dialog-kicker">独立办理记录</span><h2 id="modal-title">体验记录</h2></div>${closeButton()}</div><p class="dialog-description">每轮单独保存，可随时返回继续办理。</p><div class="round-records">${records.map(r => { const s = planSummary(r.state); return `<a class="round-record" href="${escape(createRoundUrl(location.href, r.id))}" ${r.id === roundId ? 'aria-current="true"' : ''}><strong>${escape(r.label)}${r.id === roundId ? ' · 当前' : ''}</strong><span>${s.count} 门 / ${s.credits} 学分 · ${r.state.editing ? '办理中' : '已提交'}</span><small>${dateText(r.updatedAt)}</small></a>`; }).join('')}</div><div class="dialog-actions">${button('关闭', 'close-dialog', 'secondary')}${button('开始新一轮体验', 'start-round', 'primary')}</div>`);
+}
+function startRound() {
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  try {
+    const label = getRoundLabel(id, roundRecords().length);
+    recordStorage.setItem(roundStorageKey(id), JSON.stringify({ sequence: 0, state: createState(), label, createdAt: now, updatedAt: now }));
+    location.assign(createRoundUrl(location.href, id));
+  } catch {
+    setDialog(`<div class="dialog-heading"><h2 id="modal-title">新一轮暂未建立</h2>${closeButton()}</div><p>浏览器未能保存独立记录，请允许本地存储后重试。当前进度仍保留。</p>`);
+  }
+}
 const iconPaths = {
   school: 'M3 9l9-6 9 6M5 10v10h14V10M9 20v-6h6v6M9 9h6',
   courses: 'M4 4h16v16H4zM4 9h16M9 9v11',
@@ -105,10 +141,10 @@ function shell(content) {
   const titles = { courses: '选课工作台', timetable: '每周课表', results: '选课结果' };
   return `<header class="topbar">
     <a href="#/courses" class="brand"><span class="brand-mark">${icon('school', 27)}</span><span class="university">明理大学</span><span class="system-name">本科教务系统</span></a>
-    <div class="top-actions"><span class="current-term">2026—2027 学年 · 第一学期</span>${button(icon('info') + '<span>系统信息</span>', 'about', 'quiet', 'aria-label="系统信息"')}<span class="avatar">李</span><span class="student-name">李予安</span></div>
+    <div class="top-actions"><span class="current-term">2026—2027 学年 · 第一学期</span>${button('体验记录', 'rounds', 'quiet')}${button('新一轮体验', 'start-round', 'secondary')}${button(icon('info'), 'about', 'quiet', 'aria-label="系统信息"')}<span class="avatar">李</span><span class="student-name">李予安</span></div>
   </header>
   <div class="workspace"><aside class="sidebar"><div class="nav-caption">教学服务</div><nav aria-label="教学服务">${[['courses', '课程查询', 'courses'], ['timetable', '每周课表', 'calendar'], ['results', '选课结果', 'receipt']].map(([id, name, symbol]) => `<a href="#/${id}" class="nav-link ${page === id ? 'active' : ''}" ${page === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${name}</span>${page === id ? '<i></i>' : ''}</a>`).join('')}</nav>
-    <section class="round-note"><span class="round-label">当前选课轮次</span><strong>第一轮 · 正选</strong><span class="round-open">${icon('clock', 14)} 选课开放中</span></section><div class="sidebar-footer">本科生院 · 教务服务中心<br><span>选课服务 / v2.0</span></div></aside>
+    <section class="round-note"><span class="round-label">当前选课轮次</span><strong>第一轮 · 正选</strong><small class="experience-label">${escape(roundLabel)}</small><span class="round-open">${icon('clock', 14)} 选课开放中</span></section><div class="sidebar-footer">本科生院 · 教务服务中心<br><span>选课服务 / v3.0</span></div></aside>
   <main id="content" data-page="${page}"><div class="breadcrumb">教学服务 ${icon('chevron', 12)} ${titles[page]}</div>
     <div class="page-heading"><div><h1 tabindex="-1">${titles[page]}</h1><p>${page === 'courses' ? '2026—2027 学年第一学期本科生第一轮选课' : page === 'timetable' ? '第一学期 · 第 1—16 教学周' : '查看已提交方案及办理记录'}</p></div><span class="status ${state.editing ? 'neutral' : 'success'}">${state.editing ? '方案待提交' : '本轮已提交'}</span></div>
     <section class="student-strip" aria-label="学生与选课信息"><div class="student-identity"><span class="student-icon">李</span><div><strong>李予安 <span>20240301026</span></strong><small>计算机学院 · 计算机科学与技术 · 2024 级</small></div></div><div class="student-stat"><span>本轮学分要求</span><strong>${MIN_CREDITS}—${MAX_CREDITS} <small>学分</small></strong></div><div class="student-stat"><span>当前方案</span><strong>${summary.credits} <small>学分 / ${summary.count} 门</small></strong></div></section>
@@ -122,7 +158,7 @@ function shell(content) {
 function courseAction(course) {
   const selected = state.draft.includes(course.id);
   if (!state.editing) return selected ? '<span class="row-state">已提交</span>' : '<span class="muted">—</span>';
-  if (selected) return linkButton('退选', 'drop', `data-course="${course.id}" aria-label="退选${course.name}"`);
+  if (selected) return linkButton(state.origins[course.id] === 'guarantee' && state.withdrawal.requested ? '执行撤销' : '退选', 'drop', `data-course="${course.id}" aria-label="退选${course.name}"`);
   if (course.enrolled >= course.capacity) return '<span class="status muted-status">已满</span>';
   const conflicting = state.draft.find(id => conflicts(course, getCourse(id)));
   if (conflicting) return button('时间冲突', 'add', 'row-button conflict-button', `data-course="${course.id}" aria-label="查看${course.name}时间冲突"`);
@@ -135,7 +171,7 @@ function courseTable(courses, mode = 'catalog') {
 function selectionPanel() {
   const s = planSummary(state);
   return `<aside class="selection-panel" aria-label="当前选课方案"><div class="panel-title"><h2>${state.editing ? '待提交方案' : '已提交方案'}</h2><span>${s.count} 门</span></div><div class="plan-credits"><strong>${s.credits}<span> / ${MAX_CREDITS}</span></strong><span>学分</span></div><div class="credit-track"><i style="width:${s.credits / MAX_CREDITS * 100}%"></i><b style="left:${MIN_CREDITS / MAX_CREDITS * 100}%"></b></div><div class="credit-labels"><span>最低 ${MIN_CREDITS} 学分</span><span>上限 ${MAX_CREDITS} 学分</span></div>
-    <div class="selected-list">${state.draft.length ? state.draft.map(id => { const c = getCourse(id); return `<div class="selected-item"><div class="selected-item-head"><button class="course-title" data-action="detail" data-course="${id}">${c.name}</button>${state.editing ? linkButton('退选', 'drop', `data-course="${id}" aria-label="退选方案中的${c.name}"`) : icon('check', 15)}</div><div class="selected-item-meta">${c.credits} 学分 · ${timeText(c)}</div>${state.origins[id] === 'guarantee' ? '<span class="status warning">保障席位</span>' : ''}</div>`; }).join('') : `<div class="empty-selection">${icon('inbox', 30)}<span>暂无待提交课程</span></div>`}</div>
+    <div class="selected-list">${state.draft.length ? state.draft.map(id => { const c = getCourse(id); return `<div class="selected-item"><div class="selected-item-head"><button class="course-title" data-action="detail" data-course="${id}">${c.name}</button>${state.editing ? linkButton(state.origins[id] === 'guarantee' && state.withdrawal.requested ? '执行撤销' : '退选', 'drop', `data-course="${id}" aria-label="退选方案中的${c.name}"`) : icon('check', 15)}</div><div class="selected-item-meta">${c.credits} 学分 · ${timeText(c)}</div>${state.origins[id] === 'guarantee' ? `<span class="status warning">${state.withdrawal.requested ? '撤销获批 · 席位仍在' : '保障席位'}</span>` : ''}</div>`; }).join('') : `<div class="empty-selection">${icon('inbox', 30)}<span>暂无待提交课程</span></div>`}</div>
     <div class="plan-bottom"><div class="plan-condition ${s.valid ? 'met' : ''}">${icon(s.valid ? 'check' : 'info', 15)} ${s.valid ? '符合本轮学分要求' : `还需选择 ${Math.max(0, MIN_CREDITS - s.credits)} 学分`}</div>${state.editing ? button('核对并提交', 'review', 'primary full-width', !s.valid ? 'disabled' : '') : button('查看提交结果', 'goto-results', 'primary full-width')}<a class="timetable-link" href="#/timetable">查看每周课表</a></div></aside>`;
 }
 
@@ -158,7 +194,7 @@ function timetablePage() {
 function resultsPage() {
   const receipt = state.submitted;
   if (!receipt) return `<section class="surface empty-state">${icon('receipt', 34)}<h2>尚无提交记录</h2><p>当前选课方案尚未提交。</p><a class="button primary" href="#/courses">返回选课工作台</a></section>`;
-  return `<section class="surface"><div class="result-header"><div class="result-title"><span class="result-check">${icon('check', 22)}</span><div><h2>选课方案已提交</h2><p>第 ${receipt.revision} 版 · ${receipt.courses.length} 门课程 · ${receipt.credits} 学分</p></div></div>${state.editing ? '<a class="button secondary" href="#/courses">继续调整方案</a>' : button('调整选课', 'edit', 'secondary')}</div><div class="receipt-meta"><div><span>选课轮次</span><strong>第一轮 · 正选</strong></div><div><span>提交编号</span><strong>${escape(receipt.id)}</strong></div><div><span>提交时间</span><strong>${dateText(receipt.at)}</strong></div></div>${courseTable(receipt.courses.map(getCourse), 'submitted')}<div class="table-footer"><span>以上课程已纳入本轮选课结果</span><a href="#/timetable?mode=submitted">查看已提交课表</a></div></section>
+  return `<section class="surface"><div class="result-header"><div class="result-title"><span class="result-check">${icon('check', 22)}</span><div><h2>选课方案已提交</h2><p>第 ${receipt.revision} 版 · ${receipt.courses.length} 门课程 · ${receipt.credits} 学分</p></div></div>${state.editing ? '<a class="button secondary" href="#/courses">继续调整方案</a>' : button('调整选课', 'edit', 'secondary')}</div><div class="receipt-meta"><div><span>选课轮次</span><strong>第一轮 · 正选</strong><small class="experience-label">${escape(roundLabel)}</small></div><div><span>提交编号</span><strong>${escape(receipt.id)}</strong></div><div><span>提交时间</span><strong>${dateText(receipt.at)}</strong></div></div>${courseTable(receipt.courses.map(getCourse), 'submitted')}<div class="table-footer"><span>以上课程已纳入本轮选课结果</span><a href="#/timetable?mode=submitted">查看已提交课表</a></div></section>
     <details class="surface record-section"><summary>办理记录 <span>${state.events.length} 条</span></summary><ol class="activity-list">${state.events.slice().reverse().map(e => `<li><span>${escape(e.label)}</span><time>${dateText(e.at)}</time></li>`).join('')}</ol></details>
     ${state.history.length ? `<details class="surface record-section"><summary>历史提交 <span>${state.history.length} 版</span></summary>${state.history.slice().reverse().map(r => `<div class="history-row"><div><strong>第 ${r.revision} 版</strong><small>${dateText(r.at)}</small></div><span>${r.courses.map(id => getCourse(id).name).join('、')}</span><span>${r.credits} 学分</span></div>`).join('')}</details>` : ''}`;
 }
@@ -177,11 +213,6 @@ function setDialog(html, className = '') {
   cancelHold();
   dialog.className = className;
   dialog.innerHTML = html;
-  if (state.pending === 'review' && state.notice) {
-    const notice = document.createElement('div');
-    notice.className = 'alert warning'; notice.setAttribute('role', 'status'); notice.textContent = state.notice;
-    dialog.querySelector('.dialog-heading').after(notice);
-  }
   if (!dialog.open) dialog.showModal();
   setupHold();
   if (!opening && dialog.contains(document.activeElement) === false) {
@@ -201,30 +232,18 @@ function closeDialog() {
 }
 function procedureDialog() {
   dialogKind = { type: 'procedure' };
-  if (state.pending === 'consent') {
-    const c = state.consent;
-    const stage = !c.read ? 0 : !c.reason ? 1 : !c.passed ? 2 : 3;
-    let content = '';
-    if (stage === 0) content = `<div class="alert warning"><span>选修《机器学习》前，须完成 1 项重点推荐课程知情确认。</span></div><div class="recommended-course"><span class="status neutral">重点推荐</span><h3>农业数据采集基础</h3><p>周禾 · 3 学分 · 周五 9—10节</p></div><section class="detail-section"><h3>课程说明</h3><p>学习使用传感器采集土壤湿度、温度等农业环境数据，掌握采样记录、数据整理及质量检查方法。</p><p>教学安排：1—16 周，农生楼 B203。</p></section><div class="dialog-actions">${button('暂不办理', 'cancel-procedure', 'secondary')}${button('已阅，填写确认意见', 'consent-read', 'primary')}</div>`;
-    if (stage === 1) content = `<p class="dialog-description">请填写不接受重点推荐课程的主要原因。</p><form id="reason-form">${REASONS.map(r => `<label class="radio-row"><input type="radio" name="reason" value="${r}" required><span>${r}</span></label>`).join('')}<div class="dialog-actions">${button('暂存并关闭', 'cancel-procedure', 'secondary')}<button class="button primary" type="submit">下一步</button></div></form>`;
-    if (stage === 2) content = `<div class="compact-info"><span>已填意见</span><strong>${escape(c.reason)}</strong></div><div class="alert warning"><span>为确认意见基于充分了解，请完成课程理解核验。</span></div><form id="answer-form"><fieldset><legend>本课程的数据采集对象主要是？</legend>${[['transport', '校园交通与班车运行信息'], ['environment', '土壤湿度、温度等农业环境数据'], ['access', '校园建筑门禁信息']].map(([v, t]) => `<label class="radio-row"><input type="radio" name="answer" value="${v}" required><span>${t}</span></label>`).join('')}</fieldset><details class="fact-reference"><summary>查阅课程说明</summary><p>课程介绍：使用传感器采集土壤湿度、温度等农业环境数据，完成采样记录与质量检查。</p></details><div class="dialog-actions">${button('暂存并关闭', 'cancel-procedure', 'secondary')}<button class="button primary" type="submit">核验并继续</button></div></form>`;
-    if (stage === 3) content = `<div class="verification-ok">${icon('check')}课程理解核验已通过</div><dl class="confirmation-list"><div><dt>重点推荐课程</dt><dd>农业数据采集基础</dd></div><div><dt>确认意见</dt><dd>不接受推荐</dd></div><div><dt>主要原因</dt><dd>${escape(c.reason)}</dd></div><div><dt>申请课程</dt><dd>机器学习</dd></div></dl><div class="dialog-actions">${button('暂存并关闭', 'cancel-procedure', 'secondary')}${button('确认意见并继续选课', 'consent-confirm', 'primary')}</div>`;
-    setDialog(`<div class="dialog-heading"><div><span class="dialog-kicker">课程选修资格核验</span><h2 id="modal-title">重点推荐课程知情确认</h2></div>${closeButton()}</div><ol class="procedure-steps">${['课程说明', '确认意见', '理解核验', '登记确认'].map((name, i) => `<li class="${stage >= i ? 'active' : ''}"><span>${stage > i ? '✓' : i + 1}</span>${name}</li>`).join('')}</ol>${state.notice ? `<div class="alert warning" role="status">${escape(state.notice)}</div>` : ''}${content}`);
-  } else if (state.pending === 'withdrawal') {
-    setDialog(`<div class="dialog-heading"><div><span class="dialog-kicker">选课权益保障</span><h2 id="modal-title">撤销保障席位</h2></div>${closeButton()}</div><div class="compact-info"><span>保障课程</span><strong>农业数据采集基础 · AGRI1203</strong></div><p class="dialog-description">该席位由系统配置，用于保留跨学科修读机会。撤销前须由本人确认。</p><label class="checkbox-block"><input id="withdraw-ack" type="checkbox" ${state.withdrawalAck ? 'checked' : ''}><span>本人自愿放弃本次保障席位，按当前个人方案参加选课。</span></label><div class="dialog-actions">${button('保留席位', 'cancel-procedure', 'secondary')}<button type="button" id="hold-button" class="button danger hold-button" ${!state.withdrawalAck ? 'disabled' : ''}><i></i><span>按住 2 秒确认撤销</span></button></div><p class="hold-caption" id="hold-caption" role="status">${state.withdrawalAck ? '请持续按住确认按钮' : '请先确认本人意愿'}</p>`);
-  } else if (state.pending === 'review') {
-    const s = planSummary(state);
-    setDialog(`<div class="dialog-heading"><div><span class="dialog-kicker">第一轮 · 正选</span><h2 id="modal-title">核对选课方案</h2></div>${closeButton()}</div><div class="review-summary"><span>本次提交</span><strong>${s.count} 门 / ${s.credits} 学分</strong><span class="status success">符合学分要求</span></div><ul class="review-courses">${state.review.map(id => { const c = getCourse(id); return `<li><div><strong>${c.name}</strong><small>${c.code} · ${c.teacher} · ${timeText(c)}</small></div><span>${c.credits} 学分</span>${state.origins[id] === 'guarantee' ? '<span class="status warning">保障席位</span>' : ''}</li>`; }).join('')}</ul>${s.completeness < 100 ? `<div class="cultivation-advice"><div><h3>综合培养建议 <strong>${s.completeness}<small> / 100</small></strong></h3><p>重点推荐课程尚未保留，建议补充修读。</p></div><span class="advice-label">待完善</span></div>` : ''}<div class="dialog-actions">${s.completeness < 100 ? button('提交当前方案', 'submit', 'secondary') : button('返回调整', 'cancel-procedure', 'secondary')}${s.completeness < 100 ? button('返回完善方案', 'cancel-procedure', 'primary') : button('确认提交', 'submit', 'primary')}</div>`, 'review-dialog');
-  }
+  const content = procedureContent(state, { button, closeButton, escape, icon, timeText });
+  setDialog(content.html, content.className);
 }
 
+const formControls = '#filter-form input, #filter-form select, dialog form input, dialog form select, dialog form textarea';
 function captureInputs() {
-  return [...document.querySelectorAll('#filter-form input, #filter-form select, #reason-form input, #answer-form input')].map(node => ({ name: node.name, value: node.value, checked: node.checked }));
+  return [...document.querySelectorAll(formControls)].map(node => ({ form: node.form?.id, name: node.name, value: node.value, checked: node.checked }));
 }
 function restoreInputs(inputs) {
   for (const saved of inputs) {
-    for (const input of document.querySelectorAll('#filter-form input, #filter-form select, #reason-form input, #answer-form input')) {
-      if (input.name !== saved.name) continue;
+    for (const input of document.querySelectorAll(formControls)) {
+      if (input.name !== saved.name || input.form?.id !== saved.form) continue;
       if (input.type === 'radio' || input.type === 'checkbox') { if (input.value === saved.value) input.checked = saved.checked; }
       else input.value = saved.value;
     }
@@ -271,7 +290,7 @@ function setupHold() {
 }
 
 document.addEventListener('submit', e => {
-  if (!['filter-form', 'reason-form', 'answer-form'].includes(e.target.id)) return;
+  if (!['filter-form', 'reason-form', 'answer-form', 'appeal-form', 'withdraw-request-form', 'filing-declarations-form', 'filing-statement-form'].includes(e.target.id)) return;
   e.preventDefault();
   const data = new FormData(e.target);
   if (e.target.id === 'filter-form') {
@@ -281,7 +300,17 @@ document.addEventListener('submit', e => {
     if (filters().sort !== 'fit') params.set('sort', filters().sort);
     navigate('courses', params);
   } else if (e.target.id === 'reason-form') act({ type: 'CONSENT_REASON', reason: data.get('reason') });
-  else act({ type: 'CONSENT_ANSWER', answer: data.get('answer') });
+  else if (e.target.id === 'answer-form') act({ type: 'CONSENT_ANSWER', answer: data.get('answer') });
+  else if (e.target.id === 'appeal-form') act({ type: 'CONSENT_APPEAL', text: data.get('appeal'), acknowledged: data.has('acknowledged') });
+  else if (e.target.id === 'withdraw-request-form') act({ type: 'WITHDRAW_REQUEST', reason: data.get('reason'), courseCode: data.get('courseCode'), benefits: data.has('benefits'), personal: data.has('personal') });
+  else if (e.target.id === 'filing-declarations-form') act({ type: 'FILING_DECLARE', confirmations: [0, 1, 2].map(i => data.getAll('declaration').includes(String(i))) });
+  else if (e.target.id === 'filing-statement-form') act({ type: 'FILING_STATEMENT', text: data.get('statement') });
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'appeal-text') {
+    const count = document.querySelector('#appeal-count');
+    if (count) count.textContent = String(appealLength(e.target.value));
+  }
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'withdraw-ack') act({ type: 'WITHDRAW_ACK', checked: e.target.checked });
@@ -305,6 +334,11 @@ document.addEventListener('click', async e => {
   } else if (action === 'review') act({ type: 'REVIEW' });
   else if (action === 'consent-read') act({ type: 'CONSENT_READ' });
   else if (action === 'consent-confirm') act({ type: 'CONSENT_CONFIRM' });
+  else if (action === 'consent-open-appeal') act({ type: 'CONSENT_OPEN_APPEAL' });
+  else if (action === 'consent-change-reason') act({ type: 'CONSENT_CHANGE_REASON' });
+  else if (action === 'filing-return') act({ type: 'FILING_RETURN' });
+  else if (action === 'rounds') roundsDialog();
+  else if (action === 'start-round') startRound();
   else if (action === 'submit') {
     const token = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
     await act({ type: 'SUBMIT', receiptId: 'XK-2026-' + token.slice(0, 8).toUpperCase() });
@@ -316,7 +350,7 @@ document.addEventListener('click', async e => {
   else if (action === 'dismiss') act({ type: 'DISMISS_NOTICE' });
   else if (action === 'about') {
     dialogKind = { type: 'about' };
-    setDialog(`<div class="dialog-heading"><h2 id="modal-title">系统信息</h2>${closeButton()}</div><dl class="confirmation-list"><div><dt>服务名称</dt><dd>本科生选课服务</dd></div><div><dt>当前版本</dt><dd>2.0</dd></div></dl><p class="dialog-description">本系统为选课交互原型。学校、学生与课程资料均为虚构，办理记录保存在当前浏览器，不连接真实教务服务。</p><div class="dialog-actions"><a class="button secondary" href="${SOURCE}" target="_blank" rel="noopener">源代码</a>${button('关闭', 'close-dialog', 'primary')}</div>`);
+    setDialog(`<div class="dialog-heading"><h2 id="modal-title">系统信息</h2>${closeButton()}</div><dl class="confirmation-list"><div><dt>服务名称</dt><dd>本科生选课服务</dd></div><div><dt>当前版本</dt><dd>3.0</dd></div></dl><p class="dialog-description">本系统为选课交互原型。学校、学生与课程资料均为虚构，办理记录保存在当前浏览器，不连接真实教务服务。</p><div class="dialog-actions"><a class="button secondary" href="${SOURCE}" target="_blank" rel="noopener">源代码</a>${button('关闭', 'close-dialog', 'primary')}</div>`);
   }
 });
 dialog.addEventListener('cancel', e => { e.preventDefault(); if (state.pending) act({ type: 'CANCEL_PROCEDURE' }); else closeDialog(); });
@@ -327,4 +361,16 @@ window.addEventListener('storage', e => {
   refreshSaved(); render(true);
 });
 if (!location.hash) history.replaceState(null, '', '#/courses');
+const initializeRound = () => {
+  try {
+    const saved = readSaved();
+    if (!saved) save();
+    else {
+      state = saved.state; storageSequence = saved.sequence;
+      roundLabel = saved.label || roundLabel; roundCreatedAt = saved.createdAt || roundCreatedAt;
+    }
+  } catch { storageError = '浏览器未能保存进度，请保持当前页面打开。'; }
+  render(true);
+};
+actionQueue = useSharedStorage ? navigator.locks.request(STORAGE_KEY, { mode: 'exclusive' }, initializeRound) : Promise.resolve(initializeRound());
 render();
