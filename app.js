@@ -3,6 +3,7 @@ import { createState, transition, restoreState, planSummary, MIN_CREDITS, MAX_CR
 import { getRoundId, roundStorageKey, createRoundUrl, getRoundLabel } from './rounds.mjs?v=3';
 import { procedureContent } from './procedures.mjs?v=3';
 import { buildChoiceAudit } from './insights.mjs?v=3';
+import { COUNTDOWN_DURATION, INTEREST_COURSE, SCENARIO_DURATION, createScenarioState, scenarioSnapshot, scenarioTransition } from './scenario.mjs?v=1';
 
 const roundId = getRoundId(location.href);
 const STORAGE_KEY = roundStorageKey(roundId);
@@ -30,6 +31,8 @@ const recordStorage = {
 };
 let actionQueue = Promise.resolve();
 let returnFocus = null;
+let scenarioState = createScenarioState();
+let scenarioTimer = null;
 
 function readSaved() {
   const saved = recordStorage.getItem(STORAGE_KEY);
@@ -79,7 +82,7 @@ function act(action) {
 function route() {
   const [path, query = ''] = location.hash.slice(1).split('?');
   const params = new URLSearchParams(query);
-  return { page: ['courses', 'timetable', 'results'].includes(path?.replace(/^\//, '')) ? path.replace(/^\//, '') : 'courses', params };
+  return { page: ['courses', 'timetable', 'results', 'scenario-1'].includes(path?.replace(/^\//, '')) ? path.replace(/^\//, '') : 'courses', params };
 }
 function navigate(page, params = new URLSearchParams()) {
   const value = `#/${page}${params.size ? '?' + params.toString() : ''}`;
@@ -142,7 +145,7 @@ function shell(content) {
   const titles = { courses: '选课工作台', timetable: '每周课表', results: '选课结果' };
   return `<header class="topbar">
     <a href="#/courses" class="brand"><span class="brand-mark">${icon('school', 27)}</span><span class="university">明理大学</span><span class="system-name">本科教务系统</span></a>
-    <div class="top-actions"><span class="current-term">2026—2027 学年 · 第一学期</span>${button('体验记录', 'rounds', 'quiet')}${button('新一轮体验', 'start-round', 'secondary')}${button(icon('info'), 'about', 'quiet', 'aria-label="系统信息"')}<span class="avatar">李</span><span class="student-name">李予安</span></div>
+    <div class="top-actions"><span class="current-term">2026—2027 学年 · 第一学期</span>${button('场景 1· 8:00 抢课', 'scenario-1', 'scenario-top')}${button('体验记录', 'rounds', 'quiet')}${button('新一轮体验', 'start-round', 'secondary')}${button(icon('info'), 'about', 'quiet', 'aria-label="系统信息"')}<span class="avatar">李</span><span class="student-name">李予安</span></div>
   </header>
   <div class="workspace"><aside class="sidebar"><div class="nav-caption">教学服务</div><nav aria-label="教学服务">${[['courses', '课程查询', 'courses'], ['timetable', '每周课表', 'calendar'], ['results', '选课结果', 'receipt']].map(([id, name, symbol]) => `<a href="#/${id}" class="nav-link ${page === id ? 'active' : ''}" ${page === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${name}</span>${page === id ? '<i></i>' : ''}</a>`).join('')}</nav>
     <section class="round-note"><span class="round-label">当前选课轮次</span><strong>第一轮 · 正选</strong><small class="experience-label">${escape(roundLabel)}</small><span class="round-open">${icon('clock', 14)} 选课开放中</span></section><div class="sidebar-footer">本科生院 · 教务服务中心<br><span>选课服务 / v3.0</span></div></aside>
@@ -154,6 +157,34 @@ function shell(content) {
     ${content}
     <footer class="page-footer"><span>明理大学本科生院</span><span>${storageError ? '本地保存异常' : '本地记录已保存'} · 所有时间均为北京时间</span></footer>
   </main></div>${page === 'courses' ? `<div class="mobile-plan-bar"><div><strong>${summary.credits} 学分</strong><span>${summary.count} 门${state.editing ? '待提交' : '已提交'}</span></div>${state.editing ? `${linkButton('查看方案', 'view-plan')}${button('核对并提交', 'review', 'primary', !summary.valid ? 'disabled' : '')}` : button('查看提交结果', 'goto-results', 'primary')}</div>` : ''}`;
+}
+
+function scenarioPage() {
+  const snapshot = scenarioSnapshot(scenarioState);
+  const countdown = Math.max(0, COUNTDOWN_DURATION - snapshot.elapsed);
+  const clock = snapshot.stage === 'briefing' || snapshot.stage === 'countdown' ? '07:55' : '08:00';
+  const active = snapshot.stage === 'live' || snapshot.stage === 'finished';
+  const interestDisabled = snapshot.full || snapshot.stage !== 'live' || snapshot.distracted;
+  return `<section class="scenario-page" aria-labelledby="scenario-title"><div class="scenario-hero"><span class="scenario-kicker">SCENARIO 1 · 独立体验</span><h1 id="scenario-title">8:00 抢课现场</h1><p>在这个独立场景中，你将扮演一名只想选《机器学习》的学生。你可以对其他课程感兴趣，但不想被系统安排《农业数据采集基础》。</p><div class="scenario-actions">${snapshot.stage === 'briefing' ? button('开始加速演示', 'scenario-start', 'primary') : ''}${snapshot.stage === 'finished' ? button('重新体验', 'scenario-reset', 'secondary') : ''}<a class="button secondary" href="#/courses">跳过场景，进入选课</a></div></div>
+    <div class="scenario-clock"><span>当前时间</span><strong>${clock}</strong><small>${snapshot.stage === 'countdown' ? '演示时间已加速' : snapshot.stage === 'live' ? '选课已开放' : snapshot.stage === 'finished' ? '本轮体验结束' : '离开放还有 5 分钟'}</small></div>
+    ${snapshot.stage === 'countdown' ? `<div class="scenario-countdown"><span>距离选课开始</span><strong>00:${String(Math.max(0, Math.ceil(countdown / 1000))).padStart(2, '0')}</strong><p>请在开始后尽快选择，席位会随机变化。</p></div>` : ''}
+    ${active ? `<div class="scenario-board"><div class="scenario-board-head"><div><span class="scenario-kicker">第一轮·正选</span><h2>选课清单</h2></div><span class="live-dot">LIVE</span></div><div class="scenario-courses"><article class="scenario-course-card ${snapshot.full ? 'sold-out' : ''}"><div><span class="status warning">有点感兴趣</span><h3>${INTEREST_COURSE.name}</h3><p>DES2201 · 2 学分 · 周三 5—6节</p></div><div class="scenario-seat"><strong>${snapshot.filled} / ${INTEREST_COURSE.capacity}</strong><span>${snapshot.full ? '已满' : '余余下降'}</span></div><button type="button" class="button ${snapshot.full ? 'secondary' : 'primary'}" data-action="scenario-claim" ${interestDisabled ? 'disabled' : ''}>${snapshot.full ? '已被选满' : '抢这门'}</button></article><article class="scenario-course-card target"><div><span class="status neutral">你的目标</span><h3>机器学习</h3><p>CS3102 · 3 学分 · 周三 5—6节</p></div><div class="scenario-seat"><strong>46 / 60</strong><span>尚有余位</span></div><a class="button secondary" href="#/courses?q=%E6%9C%BA%E5%99%A8%E5%AD%A6%E4%B9%A0">去选这门</a></article></div>${!snapshot.distracted && !snapshot.full ? `<div class="scenario-interruption"><span>${icon('info', 16)}</span><div><strong>重点推荐课程知情确认</strong><p>选《机器学习》前，需先完成一项推荐课程办理。</p></div>${button('处理提醒', 'scenario-distract', 'secondary')}</div>` : ''}</div>` : ''}
+    ${snapshot.stage === 'finished' ? `<div class="scenario-result ${snapshot.outcome === 'claimed' ? 'success' : 'warning'}"><h2>${snapshot.outcome === 'claimed' ? '你抢到了有点感兴趣的课' : '你错过了有点感兴趣的课'}</h2><p>${snapshot.outcome === 'claimed' ? '但你还没有处理重点推荐。返回选课工作台，体验另一个时间成本。' : '你没有失败选到《机器学习》，但你在处理系统要求时失去了另一个选择。'}</p><a class="button primary" href="#/courses?q=%E6%9C%BA%E5%99%A8%E5%AD%A6%E4%B9%A0">继续体验选课办理</a></div>` : ''}</section>`;
+}
+
+function scenarioShell() {
+  return `<header class="topbar"><a href="#/courses" class="brand"><span class="brand-mark">${icon('school', 27)}</span><span class="university">明理大学</span><span class="system-name">本科教务系统</span></a><div class="top-actions"><span class="current-term">2026—2027 学年 · 第一学期</span>${button('场景 1· 8:00 抢课', 'scenario-1', 'scenario-top')}${button('体验记录', 'rounds', 'quiet')}${button('新一轮体验', 'start-round', 'secondary')}${button(icon('info'), 'about', 'quiet', 'aria-label="系统信息"')}<span class="avatar">李</span><span class="student-name">李予安</span></div></header><main class="scenario-main" id="content">${scenarioPage()}<footer class="page-footer"><span>明理大学本科生院</span><span>场景体验与选课工作台分开运行</span></footer></main>`;
+}
+
+function stopScenarioTimer() { if (scenarioTimer) { clearInterval(scenarioTimer); scenarioTimer = null; } }
+function startScenarioTimer() {
+  stopScenarioTimer();
+  const started = performance.now();
+  scenarioTimer = setInterval(() => {
+    scenarioState = scenarioTransition(scenarioState, { type: 'TICK', elapsed: performance.now() - started });
+    render(true);
+    if (scenarioState.stage === 'finished') stopScenarioTimer();
+  }, 180);
 }
 
 function courseAction(course) {
@@ -258,9 +289,17 @@ function restoreInputs(inputs) {
   }
 }
 function render(preserveInputs = false) {
+  const { page } = route();
+  if (page === 'scenario-1') {
+    app.innerHTML = scenarioShell();
+    const scenarioActive = scenarioState.stage === 'countdown' || scenarioState.stage === 'live';
+    if (scenarioActive && !scenarioTimer) startScenarioTimer();
+    if (!scenarioActive) stopScenarioTimer();
+    return;
+  }
+  stopScenarioTimer();
   const inputs = preserveInputs ? captureInputs() : [];
   const focusedId = document.activeElement?.id;
-  const { page } = route();
   app.innerHTML = shell(({ courses: coursesPage, timetable: timetablePage, results: resultsPage })[page]());
   if (state.pending) procedureDialog();
   else if (dialogKind?.type === 'procedure') closeDialog();
@@ -349,6 +388,11 @@ document.addEventListener('click', async e => {
   else if (action === 'consent-change-reason') act({ type: 'CONSENT_CHANGE_REASON' });
   else if (action === 'filing-return') act({ type: 'FILING_RETURN' });
   else if (action === 'rounds') roundsDialog();
+  else if (action === 'scenario-1') { scenarioState = createScenarioState(); navigate('scenario-1'); }
+  else if (action === 'scenario-start') { scenarioState = scenarioTransition(scenarioState, { type: 'START' }); render(); }
+  else if (action === 'scenario-distract') { scenarioState = scenarioTransition(scenarioState, { type: 'DISTRACT' }); render(); }
+  else if (action === 'scenario-claim') { scenarioState = scenarioTransition(scenarioState, { type: 'CLAIM' }); render(); }
+  else if (action === 'scenario-reset') { scenarioState = scenarioTransition(scenarioState, { type: 'RESET' }); render(); }
   else if (action === 'start-round') startRound();
   else if (action === 'submit') {
     const token = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
