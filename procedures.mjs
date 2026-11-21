@@ -1,5 +1,5 @@
 import { getCourse } from './catalog.mjs?v=3';
-import { APPEAL_MIN, FILING_STATEMENT, OBJECTIONS, REASONS, WITHDRAW_REASONS, appealLength, planSummary } from './state.mjs?v=3';
+import { APPEAL_MIN, FILING_STATEMENT, OBJECTIONS, REASONS, WITHDRAW_REASONS, appealLength, planSummary } from './state.mjs?v=4';
 
 /** Render procedure content only; the caller owns events, focus and persistence. */
 export function procedureContent(state, { button, closeButton, escape, icon, timeText }) {

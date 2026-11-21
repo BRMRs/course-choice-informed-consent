@@ -1,5 +1,5 @@
 import { COURSES, FIT_MODEL, getCourse, filterCourses, conflicts, isMachineLearningQuery } from './catalog.mjs?v=3';
-import { createState, transition, restoreState, planSummary, MIN_CREDITS, MAX_CREDITS, appealLength } from './state.mjs?v=3';
+import { createState, transition, restoreState, planSummary, MIN_CREDITS, MAX_CREDITS, appealLength } from './state.mjs?v=4';
 import { getRoundId, roundStorageKey, createRoundUrl, getRoundLabel } from './rounds.mjs?v=3';
 import { procedureContent } from './procedures.mjs?v=3';
 import { buildChoiceAudit } from './insights.mjs?v=3';
