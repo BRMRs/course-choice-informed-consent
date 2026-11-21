@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COURSES, getCourse, filterCourses, conflicts, totalCredits } from '../catalog.mjs';
+import { COURSES, FIT_MODEL, getCourse, filterCourses, conflicts, totalCredits, isMachineLearningQuery } from '../catalog.mjs';
 
 const ids = (courses) => courses.map((course) => course.id);
 
@@ -78,6 +78,16 @@ test('machine learning queries promote exactly the four specified recommendation
       assert.deepEqual(ids(filterCourses({ query, sort })), ['ml']);
     }
   }
+});
+
+test('fit model makes institutional weighting explicit and recognizes target queries', () => {
+  assert.equal(FIT_MODEL.reduce((sum, factor) => sum + factor.weight, 0), 100);
+  assert.equal(FIT_MODEL.at(-1).label, '个人兴趣与专业方向');
+  assert.equal(FIT_MODEL.at(-1).weight, 10);
+  for (const query of ['机器学习', ' 机器学习课程 ', 'Machine Learning']) {
+    assert.equal(isMachineLearningQuery(query), true);
+  }
+  for (const query of ['', 'machine', null, 42]) assert.equal(isMachineLearningQuery(query), false);
 });
 
 test('department, category and vacancy filters combine with both ordinary and recommended search', () => {
