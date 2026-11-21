@@ -154,6 +154,17 @@ test('coordinated consent is a real shorter path that preserves the guarantee', 
   assert.ok(coordinated.events.some(event => event.type === 'coordination'));
 });
 
+test('first-year students can stage an upper-year course but submission rejects it', () => {
+  const staged = act(act(createState(), { type: 'ADD', id: 'ecology' }), { type: 'ADD', id: 'writing' });
+  assert.deepEqual(staged.draft, ['ecology', 'writing']);
+  const reviewed = act(staged, { type: 'REVIEW' });
+  assert.equal(reviewed.pending, 'review');
+  const rejected = act(reviewed, { type: 'SUBMIT', expectedCourses: ['ecology', 'writing'], receiptId: 'XK-TEST' });
+  assert.equal(rejected.editing, true);
+  assert.equal(rejected.submitted, null);
+  assert.match(rejected.notice, /不适用于大一/);
+});
+
 test('credit limits allow exactly the maximum and reject the next course without changing the draft', () => {
   const state = run(createState(), ['agri', 'robotics', 'stats', 'expert', 'ethics'].map((id) => ({ type: 'ADD', id })));
   assert.equal(totalCredits(state.draft), MAX_CREDITS);

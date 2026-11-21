@@ -116,7 +116,6 @@ export function transition(state, action) {
     if (!next.editing) { block('本轮方案已提交。如需更改，请先点击“调整选课”。'); return; }
     if (next.draft.includes(id)) { block('该教学班已在待提交方案中。'); return; }
     if (course.enrolled >= course.capacity) { block('该教学班名额已满，请选择其他教学班。'); return; }
-    if (course.eligibleFrom && course.eligibleFrom > 1) { block(`该课程建议${['', '大一', '大二', '大三', '大四'][course.eligibleFrom]}及以上年级修读，当前学生身份暂不可选。`); return; }
     const conflictId = next.draft.find(other => conflicts(course, getCourse(other)));
     if (conflictId) { block(`与《${getCourse(conflictId).name}》上课时间冲突。`); return; }
     if (totalCredits([...next.draft, id]) > MAX_CREDITS) { block(`本轮最多可选 ${MAX_CREDITS} 学分，请先调整待提交方案。`); return; }
@@ -248,6 +247,14 @@ export function transition(state, action) {
       if (next.pending !== 'review' || !next.review || !exactIds(next.review, next.draft) || !planSummary(next).valid) { block('请重新核对当前方案后提交。'); break; }
       if (!Array.isArray(action.expectedCourses) || !exactIds(action.expectedCourses, next.review)) {
         block('选课方案已更新，请核对当前课程后再次提交。'); break;
+      }
+      const ineligible = next.draft.filter(id => getCourse(id)?.eligibleFrom > 1);
+      if (ineligible.length) {
+        const names = ineligible.map(id => `《${getCourse(id).name}》`).join('、');
+        block(`当前方案包含不适用于大一的课程：${names}。请调整方案后再提交。`);
+        next.review = null;
+        next.pending = null;
+        break;
       }
       if (planSummary(next).completeness < 100 && !(next.filing.completed && next.filing.courses && exactIds(next.filing.courses, next.draft))) {
         if (!next.filing.courses || !exactIds(next.filing.courses, next.draft)) next.filing = { ...blankFiling(), courses: [...next.draft] };
