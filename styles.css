@@ -287,7 +287,7 @@ dialog .detail-section :is(textarea,select,input):focus { outline: 2px solid #8f
 .consent-dialog .procedure-steps { gap: 7px; flex-wrap: wrap; }
 .consent-dialog .procedure-steps li { min-width: 75px; }
 .dialog-description, .detail-section p, .checkbox-block, .radio-row { color: #5e6f87; }
-@media(max-width:760px) { .topbar { height: auto; min-height: 60px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; gap: 10px; } .top-actions { margin-left: auto; } .top-actions .button { font-size: 12px; min-height: 34px; } .dialog-actions { flex-wrap: wrap; } .round-records { margin: 18px; } }
+@media(max-width:760px) { header.topbar { height: auto; min-height: 60px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; gap: 10px; } header .top-actions { margin-left: auto; } .top-actions .button { font-size: 12px; min-height: 34px; } dialog .dialog-actions { flex-wrap: wrap; } .round-records { margin: 18px; } }
 @media(min-width:1081px) {
   main { padding-top: 18px; }
   .breadcrumb { margin-bottom: 12px; }
