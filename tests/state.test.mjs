@@ -60,7 +60,7 @@ function withdraw(state) {
 }
 
 function submit(state, receiptId = 'receipt-1', at = 100) {
-  return run(state, [{ type: 'REVIEW' }, { type: 'SUBMIT', receiptId, at }]);
+  return run(state, [{ type: 'REVIEW' }, { type: 'SUBMIT', receiptId, at, expectedCourses: state.draft }]);
 }
 
 test('new states are independent, restorable and summarize an empty plan', () => {
@@ -139,7 +139,7 @@ test('below-minimum drafts cannot be reviewed or submitted; exactly the minimum 
     assert.equal(reviewed.review, null);
     assert.equal(reviewed.pending, null);
     assert.ok(reviewed.notice);
-    assert.equal(act(reviewed, { type: 'SUBMIT', receiptId: 'invalid' }).submitted, null);
+    assert.equal(act(reviewed, { type: 'SUBMIT', receiptId: 'invalid', expectedCourses: reviewed.draft }).submitted, null);
   }
   const state = run(createState(), ['stats', 'music'].map((id) => ({ type: 'ADD', id })));
   assert.equal(planSummary(state).credits, MIN_CREDITS);
@@ -315,17 +315,51 @@ test('review is a separate snapshot; changes and closing invalidate it and requi
     const changed = act(reviewed, action);
     assert.equal(changed.review, null);
     assert.equal(changed.pending, null);
-    assert.equal(act(changed, { type: 'SUBMIT', receiptId: 'stale' }).submitted, null);
+    assert.equal(act(changed, { type: 'SUBMIT', receiptId: 'stale', expectedCourses: changed.draft }).submitted, null);
   }
-  assert.equal(act(base, { type: 'SUBMIT', receiptId: 'unreviewed' }).submitted, null);
+  assert.equal(act(base, { type: 'SUBMIT', receiptId: 'unreviewed', expectedCourses: base.draft }).submitted, null);
+});
+
+test('a stale review from another tab cannot submit a newer reviewed plan', () => {
+  const reviewA = act(act(createState(), { type: 'ADD', id: 'agri' }), { type: 'REVIEW' });
+  const expectedA = [...reviewA.review];
+  assert.equal(totalCredits(expectedA), 3);
+  const reviewB = run(reviewA, [{ type: 'ADD', id: 'stats' }, { type: 'REVIEW' }]);
+  const expectedB = [...reviewB.review];
+  assert.equal(totalCredits(expectedB), 5);
+
+  const blocked = act(reviewB, { type: 'SUBMIT', receiptId: 'stale-tab', expectedCourses: expectedA });
+  assert.equal(blocked.submitted, null);
+  assert.equal(blocked.editing, true);
+  assert.deepEqual(blocked.draft, expectedB);
+  assert.deepEqual(blocked.history, []);
+  assert.deepEqual(blocked.events, reviewB.events);
+  assert.ok(blocked.notice);
+
+  const submitted = act(blocked, { type: 'SUBMIT', receiptId: 'current-tab', expectedCourses: expectedB, at: 100 });
+  assert.equal(submitted.editing, false);
+  assert.deepEqual(submitted.submitted, {
+    id: 'current-tab', at: 100, courses: expectedB, credits: 5, revision: 1,
+  });
+});
+
+test('a reviewed plan cannot be submitted without expectedCourses', () => {
+  const reviewed = act(act(createState(), { type: 'ADD', id: 'agri' }), { type: 'REVIEW' });
+  const blocked = act(reviewed, { type: 'SUBMIT', receiptId: 'missing-snapshot' });
+  assert.equal(blocked.submitted, null);
+  assert.equal(blocked.editing, true);
+  assert.deepEqual(blocked.draft, reviewed.draft);
+  assert.deepEqual(blocked.history, []);
+  assert.deepEqual(blocked.events, reviewed.events);
+  assert.ok(blocked.notice);
 });
 
 test('submission requires a receipt ID and repeated submit is idempotent', () => {
   const reviewed = act(act(createState(), { type: 'ADD', id: 'agri' }), { type: 'REVIEW' });
   for (const receiptId of [undefined, '', '   ', 123]) {
-    assert.throws(() => transition(reviewed, { type: 'SUBMIT', receiptId }), TypeError);
+    assert.throws(() => transition(reviewed, { type: 'SUBMIT', receiptId, expectedCourses: reviewed.draft }), TypeError);
   }
-  const submitted = act(reviewed, { type: 'SUBMIT', receiptId: 'first', at: 101 });
+  const submitted = act(reviewed, { type: 'SUBMIT', receiptId: 'first', at: 101, expectedCourses: reviewed.draft });
   const repeated = act(submitted, { type: 'SUBMIT', receiptId: 'second', at: 999 });
   assert.deepEqual(repeated.submitted, submitted.submitted);
   assert.deepEqual(repeated.history, []);

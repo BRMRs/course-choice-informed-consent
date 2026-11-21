@@ -151,6 +151,9 @@ export function transition(state, action) {
     case 'SUBMIT': {
       if (!next.editing && next.submitted) break;
       if (next.pending !== 'review' || !next.review || !exactIds(next.review, next.draft) || !planSummary(next).valid) { block('请重新核对当前方案后提交。'); break; }
+      if (!Array.isArray(action.expectedCourses) || !exactIds(action.expectedCourses, next.review)) {
+        block('选课方案已更新，请核对当前课程后再次提交。'); break;
+      }
       if (typeof action.receiptId !== 'string' || !action.receiptId.trim()) throw new TypeError('Missing receipt ID');
       if (next.submitted) next.history.push(structuredClone(next.submitted));
       next.submitted = { id: action.receiptId, at, courses: [...next.draft], credits: totalCredits(next.draft), revision: next.history.length + 1 };
