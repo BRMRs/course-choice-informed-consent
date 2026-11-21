@@ -20,7 +20,8 @@ export function procedureContent(state, { button, closeButton, escape, icon, tim
       content = `<div class="alert warning"><span>选修《机器学习》前，须完成重点推荐课程知情确认。</span></div>
         <div class="recommended-course"><span class="status neutral">重点推荐</span><h3>${escape(agri.name)}</h3><p>${escape(agri.teacher)} · ${agri.credits} 学分 · ${escape(timeText(agri))}</p></div>
         <section class="detail-section"><h3>课程说明</h3><p>学习使用传感器采集土壤湿度、温度等农业环境数据，掌握采样记录、数据整理及质量检查方法。</p><p>教学安排：${escape(agri.weeks)}，${escape(agri.room)}。</p></section>
-        ${actions(cancel('暂不办理') + button('已阅，填写确认意见', 'consent-read', 'primary'))}`;
+        <p class="dialog-description">如果你愿意接受学校的均衡排课方案，可直接采用协调路径：系统会保留机器学习的选课资格，并自动配置一门保障席位，省去个人方案备案。</p>
+        ${actions(cancel('暂不办理') + button('采用学校协调方案', 'consent-coordinate', 'primary') + button('已阅，填写确认意见', 'consent-read', 'secondary'))}`;
     } else if (stage === 1) {
       content = `<p class="dialog-description">请填写不接受重点推荐课程的主要原因。</p>
         <form id="reason-form"><fieldset><legend class="sr-only">不接受推荐的主要原因</legend>${REASONS.map(reason => `<label class="radio-row"><input type="radio" name="reason" value="${escape(reason)}" required><span>${escape(reason)}</span></label>`).join('')}</fieldset>

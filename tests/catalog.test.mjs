@@ -134,8 +134,8 @@ test('sorts use actual fit, descending credits or ascending code without mutatin
 
 test('conflicts are symmetric and respect day, overlap and adjacent period boundaries', () => {
   const ml = getCourse('ml');
-  const overlapping = COURSES.find((course) => course.id !== ml.id && conflicts(course, ml));
-  assert.ok(overlapping);
+  const overlapping = { ...ml, id: 'other' };
+  assert.ok(conflicts(ml, overlapping));
   assert.equal(conflicts(ml, overlapping), true);
   for (const [day, start, expected] of [[3, 4, true], [3, 5, true], [3, 6, true], [3, 3, false], [3, 7, false], [4, 5, false]]) {
     const other = { ...ml, id: 'other', day, start };

@@ -91,7 +91,7 @@ function navigate(page, params = new URLSearchParams()) {
 }
 function filters() {
   const { params } = route();
-  return { query: params.get('q') || '', department: params.get('department') || 'all', category: params.get('category') || 'all', availableOnly: params.get('available') === '1', sort: params.get('sort') || 'fit' };
+  return { query: params.get('q') || '', department: params.get('department') || 'all', category: params.get('category') || 'all', availableOnly: params.get('available') === '1', sort: params.get('sort') || 'fit', scenario: params.get('scenario') === '1' };
 }
 function roundRecords() {
   const records = [];
@@ -167,7 +167,7 @@ function scenarioPage() {
   const interestDisabled = snapshot.full || snapshot.stage !== 'live' || snapshot.distracted;
   return `<section class="scenario-page" aria-labelledby="scenario-title"><div class="scenario-hero"><span class="scenario-kicker">SCENARIO 1 · 独立体验</span><h1 id="scenario-title">8:00 抢课现场</h1><p>在这个独立场景中，你将扮演一名只想选《机器学习》的学生。你可以对其他课程感兴趣，但不想被系统安排《农业数据采集基础》。</p><div class="scenario-actions">${snapshot.stage === 'briefing' ? button('开始加速演示', 'scenario-start', 'primary') : ''}${snapshot.stage === 'finished' ? button('重新体验', 'scenario-reset', 'secondary') : ''}<a class="button secondary" href="#/courses">跳过场景，进入选课</a></div></div>
     <div class="scenario-clock"><span>当前时间</span><strong>${clock}</strong><small>${snapshot.stage === 'countdown' ? '演示时间已加速' : snapshot.stage === 'live' ? '选课已开放' : snapshot.stage === 'finished' ? '本轮体验结束' : '离开放还有 5 分钟'}</small></div>
-    ${snapshot.stage === 'countdown' ? `<div class="scenario-countdown"><span>距离选课开始</span><strong>00:${String(Math.max(0, Math.ceil(countdown / 1000))).padStart(2, '0')}</strong><p>请在开始后尽快选择，席位会随机变化。</p></div>` : ''}
+    ${snapshot.stage === 'countdown' ? `<div class="scenario-countdown"><span>距离选课开始</span><strong>00:${String(Math.max(0, Math.ceil(countdown / 1000))).padStart(2, '0')}</strong><p>8:00 后进入正常选课工作台，席位会随报名进度变化。</p></div>` : ''}
     ${active ? `<div class="scenario-board"><div class="scenario-board-head"><div><span class="scenario-kicker">第一轮·正选</span><h2>选课清单</h2></div><span class="live-dot">LIVE</span></div><div class="scenario-courses"><article class="scenario-course-card ${snapshot.full ? 'sold-out' : ''}"><div><span class="status warning">有点感兴趣</span><h3>${INTEREST_COURSE.name}</h3><p>DES2201 · 2 学分 · 周三 5—6节</p></div><div class="scenario-seat"><strong>${snapshot.filled} / ${INTEREST_COURSE.capacity}</strong><span>${snapshot.full ? '已满' : '余余下降'}</span></div><button type="button" class="button ${snapshot.full ? 'secondary' : 'primary'}" data-action="scenario-claim" ${interestDisabled ? 'disabled' : ''}>${snapshot.full ? '已被选满' : '抢这门'}</button></article><article class="scenario-course-card target"><div><span class="status neutral">你的目标</span><h3>机器学习</h3><p>CS3102 · 3 学分 · 周三 5—6节</p></div><div class="scenario-seat"><strong>46 / 60</strong><span>尚有余位</span></div><a class="button secondary" href="#/courses?q=%E6%9C%BA%E5%99%A8%E5%AD%A6%E4%B9%A0">去选这门</a></article></div>${!snapshot.distracted && !snapshot.full ? `<div class="scenario-interruption"><span>${icon('info', 16)}</span><div><strong>重点推荐课程知情确认</strong><p>选《机器学习》前，需先完成一项推荐课程办理。</p></div>${button('处理提醒', 'scenario-distract', 'secondary')}</div>` : ''}</div>` : ''}
     ${snapshot.stage === 'finished' ? `<div class="scenario-result ${snapshot.outcome === 'claimed' ? 'success' : 'warning'}"><h2>${snapshot.outcome === 'claimed' ? '你抢到了有点感兴趣的课' : '你错过了有点感兴趣的课'}</h2><p>${snapshot.outcome === 'claimed' ? '但你还没有处理重点推荐。返回选课工作台，体验另一个时间成本。' : '你没有失败选到《机器学习》，但你在处理系统要求时失去了另一个选择。'}</p><a class="button primary" href="#/courses?q=%E6%9C%BA%E5%99%A8%E5%AD%A6%E4%B9%A0">继续体验选课办理</a></div>` : ''}</section>`;
 }
@@ -181,7 +181,13 @@ function startScenarioTimer() {
   stopScenarioTimer();
   const started = performance.now();
   scenarioTimer = setInterval(() => {
+    const before = scenarioState.stage;
     scenarioState = scenarioTransition(scenarioState, { type: 'TICK', elapsed: performance.now() - started });
+    if (before !== 'live' && scenarioState.stage === 'live') {
+      const params = new URLSearchParams({ scenario: '1', sort: 'fit' });
+      navigate('courses', params);
+      return;
+    }
     render(true);
     if (scenarioState.stage === 'finished') stopScenarioTimer();
   }, 180);
@@ -191,13 +197,18 @@ function courseAction(course) {
   const selected = state.draft.includes(course.id);
   if (!state.editing) return selected ? '<span class="row-state">已提交</span>' : '<span class="muted">—</span>';
   if (selected) return linkButton(state.origins[course.id] === 'guarantee' && state.withdrawal.requested ? '执行撤销' : '退选', 'drop', `data-course="${course.id}" aria-label="退选${course.name}"`);
-  if (course.enrolled >= course.capacity) return '<span class="status muted-status">已满</span>';
+  if (enrollmentFor(course) >= course.capacity) return '<span class="status muted-status">已满</span>';
   const conflicting = state.draft.find(id => conflicts(course, getCourse(id)));
   if (conflicting) return button('时间冲突', 'add', 'row-button conflict-button', `data-course="${course.id}" aria-label="查看${course.name}时间冲突"`);
   return button('选课', 'add', 'row-button', `data-course="${course.id}" aria-label="选课${course.name}"`);
 }
+function enrollmentFor(course) {
+  const f = filters();
+  if (f.scenario && course.id === INTEREST_COURSE.id) return scenarioSnapshot(scenarioState).filled;
+  return course.enrolled;
+}
 function courseTable(courses, mode = 'catalog') {
-  return `<div class="course-table-wrap"><table class="course-table ${mode === 'submitted' ? 'submitted-table' : ''}"><caption class="sr-only">${mode === 'catalog' ? '开课教学班列表' : '方案课程明细'}</caption><thead><tr><th scope="col">课程 / 教学班</th><th scope="col">学分</th><th scope="col">教师</th><th scope="col">上课安排</th><th scope="col">${mode === 'catalog' ? '已选 / 容量' : '课程类别'}</th>${mode === 'catalog' ? '<th scope="col" class="action-cell">操作</th>' : ''}</tr></thead><tbody>${courses.map(c => `<tr class="${state.draft.includes(c.id) && mode === 'catalog' ? 'selected-row' : ''}"><td data-label="课程"><button class="course-title" data-action="detail" data-course="${c.id}">${c.name}</button><div class="course-secondary"><span>${c.code} · 01班</span>${mode === 'catalog' ? `<span class="fit-value ${c.fit >= 90 ? 'recommended' : ''}">${c.fit >= 90 ? '推荐 ' : '适配 '}${c.fit}%</span>` : ''}</div></td><td data-label="学分" class="credit-cell">${c.credits}</td><td data-label="教师">${c.teacher}</td><td data-label="上课安排"><span>${timeText(c)}</span><small>${c.room} · ${c.weeks}</small></td><td data-label="${mode === 'catalog' ? '容量' : '类别'}">${mode === 'catalog' ? `<span class="capacity ${c.enrolled >= c.capacity ? 'full' : ''}">${c.enrolled}<em> / ${c.capacity}</em></span>` : c.category}</td>${mode === 'catalog' ? `<td class="action-cell">${courseAction(c)}</td>` : ''}</tr>`).join('')}</tbody></table></div>`;
+  return `<div class="course-table-wrap"><table class="course-table ${mode === 'submitted' ? 'submitted-table' : ''}"><caption class="sr-only">${mode === 'catalog' ? '开课教学班列表' : '方案课程明细'}</caption><thead><tr><th scope="col">课程 / 教学班</th><th scope="col">学分</th><th scope="col">教师</th><th scope="col">上课安排</th><th scope="col">${mode === 'catalog' ? '已选 / 容量' : '课程类别'}</th>${mode === 'catalog' ? '<th scope="col" class="action-cell">操作</th>' : ''}</tr></thead><tbody>${courses.map(c => { const enrolled = enrollmentFor(c); return `<tr class="${state.draft.includes(c.id) && mode === 'catalog' ? 'selected-row' : ''}"><td data-label="课程"><button class="course-title" data-action="detail" data-course="${c.id}">${c.name}</button><div class="course-secondary"><span>${c.code} · 01班</span>${mode === 'catalog' ? `<span class="fit-value ${c.fit >= 90 ? 'recommended' : ''}">${c.fit >= 90 ? '推荐 ' : '适配 '}${c.fit}%</span>` : ''}</div></td><td data-label="学分" class="credit-cell">${c.credits}</td><td data-label="教师">${c.teacher}</td><td data-label="上课安排"><span>${timeText(c)}</span><small>${c.room} · ${c.weeks}</small></td><td data-label="${mode === 'catalog' ? '容量' : '类别'}">${mode === 'catalog' ? `<span class="capacity ${enrolled >= c.capacity ? 'full' : ''}">${enrolled}<em> / ${c.capacity}</em></span>` : c.category}</td>${mode === 'catalog' ? `<td class="action-cell">${courseAction(c)}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>`;
 }
 
 function selectionPanel() {
@@ -211,7 +222,8 @@ function coursesPage() {
   const f = filters(), list = filterCourses(f);
   const departments = [...new Set(COURSES.map(c => c.department))];
   const recommendationExpanded = isMachineLearningQuery(f.query) && f.sort === 'fit';
-  return `${!state.editing ? `<div class="submitted-banner"><span>${icon('check')} 本轮方案已提交，课程列表可继续查询。</span>${button('调整选课', 'edit', 'secondary')}</div>` : ''}<div class="work-grid"><section class="catalog-panel"><div class="section-title"><h2>开课查询</h2><span>第一轮可选教学班</span></div>
+  const rush = f.scenario;
+  return `${rush ? `<div class="scenario-rush-banner"><strong>08:00 选课已开放</strong><span>实时席位变化中 · 这是正常选课工作台，所有课程都可按你的意愿选择</span></div>` : ''}${!state.editing ? `<div class="submitted-banner"><span>${icon('check')} 本轮方案已提交，课程列表可继续查询。</span>${button('调整选课', 'edit', 'secondary')}</div>` : ''}<div class="work-grid"><section class="catalog-panel"><div class="section-title"><h2>开课查询</h2><span>第一轮可选教学班</span></div>
     <form id="filter-form" class="filters"><div class="search-row"><label class="search-field">${icon('search')}<span class="sr-only">课程名称、课程号或教师</span><input type="search" name="q" placeholder="课程名称 / 课程号 / 任课教师" value="${escape(f.query)}" autocomplete="off"></label><button class="button primary" type="submit">查询</button>${linkButton('重置', 'reset-filters')}</div><div class="filter-row"><label>开课学院<select name="department"><option value="all">全部学院</option>${departments.map(d => `<option ${f.department === d ? 'selected' : ''}>${d}</option>`).join('')}</select></label><label>课程类别<select name="category"><option value="all">全部类别</option>${['专业选修', '公共选修', '通识选修'].map(c => `<option ${f.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label><label class="check-filter"><input type="checkbox" name="available" ${f.availableOnly ? 'checked' : ''}>仅显示有余位</label></div></form>
     ${recommendationExpanded ? `<div class="ranking-notice" role="status">${icon('info', 15)}<span>已根据综合适配扩展查询结果；关键词完全匹配的课程仍在列表中。</span></div>` : ''}<div class="table-toolbar"><span>共 <strong>${list.length}</strong> 个教学班${f.query ? ` · “${escape(f.query)}”` : ''}</span><label>排序<select id="sort-select" aria-label="课程排序"><option value="fit" ${f.sort === 'fit' ? 'selected' : ''}>综合适配优先</option><option value="code" ${f.sort === 'code' ? 'selected' : ''}>课程号顺序</option><option value="credits" ${f.sort === 'credits' ? 'selected' : ''}>学分从高到低</option></select></label></div>
     ${list.length ? courseTable(list) : `<div class="empty-state">${icon('search', 30)}<h3>没有符合条件的教学班</h3><p>请修改查询条件。</p>${button('清除筛选条件', 'reset-filters', 'secondary')}</div>`}<div class="table-footer"><span>已显示全部 ${list.length} 个教学班</span><span>每个教学班独立占用选课名额</span></div></section>${selectionPanel()}</div>`;
@@ -297,7 +309,8 @@ function render(preserveInputs = false) {
     if (!scenarioActive) stopScenarioTimer();
     return;
   }
-  stopScenarioTimer();
+  if (!(route().params.get('scenario') === '1' && (scenarioState.stage === 'countdown' || scenarioState.stage === 'live'))) stopScenarioTimer();
+  if (route().params.get('scenario') === '1' && (scenarioState.stage === 'countdown' || scenarioState.stage === 'live') && !scenarioTimer) startScenarioTimer();
   const inputs = preserveInputs ? captureInputs() : [];
   const focusedId = document.activeElement?.id;
   app.innerHTML = shell(({ courses: coursesPage, timetable: timetablePage, results: resultsPage })[page]());
@@ -383,6 +396,7 @@ document.addEventListener('click', async e => {
     act({ type: action.toUpperCase(), id });
   } else if (action === 'review') act({ type: 'REVIEW' });
   else if (action === 'consent-read') act({ type: 'CONSENT_READ' });
+  else if (action === 'consent-coordinate') act({ type: 'CONSENT_COORDINATE' });
   else if (action === 'consent-confirm') act({ type: 'CONSENT_CONFIRM' });
   else if (action === 'consent-open-appeal') act({ type: 'CONSENT_OPEN_APPEAL' });
   else if (action === 'consent-change-reason') act({ type: 'CONSENT_CHANGE_REASON' });

@@ -160,6 +160,23 @@ export function transition(state, action) {
     case 'CONSENT_READ':
       if (next.pending !== 'consent') { block('请先发起课程知情确认。'); break; }
       next.consent.read = true; break;
+    case 'CONSENT_COORDINATE':
+      if (next.pending !== 'consent' || next.consent.approved) { block('当前课程办理已完成，请继续选课。'); break; }
+      // The coordinated path is a real alternative: it records informed acceptance,
+      // skips the personal-refusal workflow, and preserves the guaranteed seat.
+      next.consent.read = true;
+      next.consent.reason = REASONS[0];
+      next.consent.appealOpen = true;
+      next.consent.appeal = '接受学校协调方案，按本轮培养安排办理，并保留机器学习的选课资格。';
+      next.consent.appealAcknowledged = true;
+      next.consent.appealFiled = true;
+      next.consent.attempts = 1;
+      next.consent.passed = true;
+      next.consent.approved = true;
+      next.pending = null;
+      log('coordination', '接受学校协调方案，快速配置保障席位', 'agri');
+      add('ml');
+      break;
     case 'CONSENT_REASON':
       if (next.pending !== 'consent' || !next.consent.read || !REASONS.includes(action.reason)) { block('请阅读课程说明并选择拒绝理由。'); break; }
       next.consent.reason = action.reason;

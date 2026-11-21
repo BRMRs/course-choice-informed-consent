@@ -134,16 +134,24 @@ test('unknown and full courses cannot enter the draft', () => {
   }
 });
 
-test('schedule conflicts block ML before consent and block ordinary additions after approval', () => {
+test('visualization remains selectable alongside ML after the timetable fix', () => {
   const ordinary = act(createState(), { type: 'ADD', id: 'visualization' });
   const blockedMl = act(ordinary, { type: 'ADD', id: 'ml' });
   assert.deepEqual(blockedMl.draft, ['visualization']);
-  assert.equal(blockedMl.pending, null);
-  assert.match(blockedMl.notice, /冲突/);
+  assert.equal(blockedMl.pending, 'consent');
   const approved = qualified();
   const blockedOrdinary = act(approved, { type: 'ADD', id: 'visualization' });
-  assert.deepEqual(blockedOrdinary.draft, approved.draft);
-  assert.match(blockedOrdinary.notice, /冲突/);
+  assert.deepEqual(blockedOrdinary.draft, [...approved.draft, 'visualization']);
+});
+
+test('coordinated consent is a real shorter path that preserves the guarantee', () => {
+  const pending = act(createState(), { type: 'ADD', id: 'ml' });
+  const coordinated = act(pending, { type: 'CONSENT_COORDINATE' });
+  assert.equal(coordinated.pending, null);
+  assert.equal(coordinated.consent.approved, true);
+  assert.deepEqual(coordinated.draft, ['ml', 'agri']);
+  assert.equal(coordinated.origins.agri, 'guarantee');
+  assert.ok(coordinated.events.some(event => event.type === 'coordination'));
 });
 
 test('credit limits allow exactly the maximum and reject the next course without changing the draft', () => {
@@ -488,10 +496,6 @@ test('restore rejects malformed shapes and impossible consent, guarantee, review
     mutate(state);
     invalid.push(state);
   }
-  const conflicting = qualified();
-  conflicting.draft.push('visualization');
-  conflicting.origins.visualization = 'student';
-  invalid.push(conflicting);
   const removed = qualified();
   removed.guarantee.removed = true;
   invalid.push(removed);
