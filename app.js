@@ -27,8 +27,20 @@ const paths = {
 function icon(name, size=20) { return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name] || paths.book}"/></svg>`; }
 function button(label, action, style='', extra='') { return `<button class="button ${style}" data-action="${action}" ${extra}>${label}</button>`; }
 function textButton(label, action, extra='') { return `<button class="text-button" data-action="${action}" ${extra}>${label}</button>`; }
-function persist() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { storageWarning = '本次可以继续办理，但浏览器未能保存进度，刷新可能丢失当前进度。'; } }
+function syncReceipt() {
+  try {
+    const saved = localStorage.getItem(KEY);
+    if (!saved) return false;
+    const latest = restore(JSON.parse(saved));
+    if (latest.receipt && latest.receipt.id !== state.receipt?.id) {
+      state = latest; recovery = '另一标签页已完成提交，已同步最终回执。'; return true;
+    }
+  } catch { /* A recoverable storage failure must not block this session. */ }
+  return false;
+}
+function persist(forceReset=false) { try { if (!forceReset && syncReceipt()) render(); localStorage.setItem(KEY, JSON.stringify(state)); } catch { storageWarning = '本次可以继续办理，但浏览器未能保存进度，刷新可能丢失当前进度。'; } }
 function dispatch(action) {
+  syncReceipt();
   const before = state.view;
   state = reduce(state, action);
   recovery = '';
@@ -151,17 +163,26 @@ document.addEventListener('change',e=>{if(e.target.id==='waiver')dispatch({type:
 document.addEventListener('click',e=>{
   const target=e.target.closest('[data-action]');if(!target)return;e.preventDefault();
   const action=target.dataset.action;
-  const actions={home:{type:'NAVIGATE',view:'home'},results:{type:'NAVIGATE',view:'results'},cart:{type:'OPEN_CART'},target:{type:'OPEN_TARGET'},consent:{type:'OPEN_CONSENT'},read:{type:'READ'},reject:{type:'REJECT'},add:{type:'ADD_TARGET'},remove:{type:'OPEN_REMOVE'},review:{type:'REVIEW'},submit:{type:'SUBMIT',id:'ML-'+crypto.randomUUID().slice(0,8).toUpperCase(),time:new Date().toISOString()},'quick-search':{type:'SEARCH',query:'机器学习'}};
+  const actions={home:{type:'NAVIGATE',view:'home'},results:{type:'NAVIGATE',view:'results'},cart:{type:'OPEN_CART'},target:{type:'OPEN_TARGET'},consent:{type:'OPEN_CONSENT'},read:{type:'READ'},reject:{type:'REJECT'},add:{type:'ADD_TARGET'},remove:{type:'OPEN_REMOVE'},review:{type:'REVIEW'},submit:{type:'SUBMIT'},'quick-search':{type:'SEARCH',query:'机器学习'}};
+  if (action==='submit') {
+    const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`;
+    actions.submit.id = 'ML-'+random.slice(0,18).toUpperCase(); actions.submit.time = new Date().toISOString();
+  }
   if(actions[action])dispatch(actions[action]);
   else if(action==='course-info') {const c=courses.find(c=>c.id===target.dataset.course);showDialog(c.title,`<p>${c.reason}</p><p>综合适配度 ${c.score}%。本次演示的任务是只选《机器学习》；此课程可以了解，无需另办拒绝手续。</p>`);}
   else if(action==='suggestions')showDialog('你的成长建议依然有效',`<p>我们建议保留农业数据采集课程，完善跨学科学习体验。</p><p>你已放弃该保障席位。查看建议不会重新加课；《机器学习》已满足本轮提交条件。</p>`,button('我仍按当前方案办理','close-modal'));
   else if(action==='close-modal')modal.close();
   else if(action==='reset')showDialog('重新开始本次体验？','<p>将清空此浏览器保存的办理进度、课表、账单与演示回执。其他浏览器不受影响。</p>',button('保留进度','close-modal','secondary')+button('清空并重新体验','confirm-reset'));
-  else if(action==='confirm-reset'){modal.close();state=initialState();storageWarning='';recovery='';persist();render();window.scrollTo(0,0);}
+  else if(action==='confirm-reset'){modal.close();state=initialState();storageWarning='';recovery='';persist(true);render();window.scrollTo(0,0);}
 });
 let lastActive=performance.now();
-function accrue() {const now=performance.now();if(!document.hidden&&!state.receipt){state=reduce(state,{type:'TICK',ms:Math.floor(Math.max(0,now-lastActive))});persist();}lastActive=now;}
+function accrue() {const now=performance.now();if(syncReceipt())render();if(!document.hidden&&!state.receipt){state=reduce(state,{type:'TICK',ms:Math.floor(Math.max(0,now-lastActive))});}lastActive=now;}
 setInterval(accrue,1000);
 document.addEventListener('visibilitychange',()=>{lastActive=performance.now();});
-window.addEventListener('pagehide',accrue);
+window.addEventListener('pagehide',()=>{accrue();persist();});
+window.addEventListener('storage',e=>{
+  if(e.key!==KEY || !e.newValue)return;
+  try { const latest=localStorage.getItem(KEY);if(!latest)return;state=restore(JSON.parse(latest));recovery=state.receipt?'另一标签页已完成提交，已同步最终回执。':'已同步另一标签页的办理进度。';lastActive=performance.now();render(); }
+  catch { storageWarning='另一标签页的数据无法读取，本页仍可继续办理。';render(); }
+});
 render();
