@@ -257,6 +257,10 @@ legend { font-size: 14px; font-weight: 550; padding: 0 24px; margin-bottom: 7px;
 .mobile-plan-bar { display: none; }
 @media(max-width:760px) {
   body { padding-bottom: 76px; }
+  .breadcrumb { display: none; }
+  .student-stat { display: flex; align-items: baseline; gap: 8px; }
+  .student-stat > span { font-size: 10px; }
+  .student-stat strong { font-size: 16px; }
   .mobile-plan-bar { display: flex; align-items: center; gap: 15px; position: fixed; z-index: 4; bottom: 0; left: 0; right: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid #dde4ee; background: #fff; box-shadow: 0 -3px 15px #23395707; }
   .mobile-plan-bar > div { flex: 1; }
   .mobile-plan-bar strong { display: block; color: #344966; font-size: 16px; }
@@ -269,6 +273,18 @@ legend { font-size: 14px; font-weight: 550; padding: 0 24px; margin-bottom: 7px;
 .course-table td { color: #4e6079; }
 .fit-value { font-size: 10px; }
 .nav-link { white-space: nowrap; }
+@media(min-width:1081px) {
+  main { padding-top: 18px; }
+  .breadcrumb { margin-bottom: 12px; }
+  .page-heading { margin-bottom: 16px; }
+  main[data-page="courses"] .page-heading p { display: none; }
+  .student-strip { padding-top: 12px; padding-bottom: 12px; margin-bottom: 16px; }
+  .section-title { padding-top: 11px; padding-bottom: 11px; }
+  .filters { padding-top: 12px; padding-bottom: 12px; }
+  .filter-row { margin-top: 10px; }
+  .table-toolbar { min-height: 38px; padding-top: 4px; padding-bottom: 4px; }
+  .course-table td { padding-top: 11px; padding-bottom: 11px; }
+}
 @media(min-width:1600px) { main { padding: 27px 42px; } .work-grid { grid-template-columns: minmax(0,1fr) 285px; gap: 24px; } .course-table td { padding-top: 18px; padding-bottom: 18px; } }
 @media(max-width:1250px) { .workspace { grid-template-columns: 170px minmax(0,1fr); } main { padding: 22px; } .work-grid { grid-template-columns: minmax(0,1fr) 235px; gap: 15px; } .filter-row { flex-wrap: wrap; gap: 10px 14px; } .check-filter { margin-left: 0; } .course-table th, .course-table td { padding-left: 7px; padding-right: 7px; } .course-table th:first-child, .course-table td:first-child { padding-left: 15px; } .course-table th:last-child, .course-table td:last-child { padding-right: 15px; } .course-table td:first-child { min-width: 170px; } .course-secondary { flex-wrap: wrap; gap: 4px; } .student-stat { min-width: 125px; padding-left: 20px; } .course-table td > small { white-space: normal; } }
 @media(max-width:1080px) { .work-grid { grid-template-columns: minmax(0,1fr); } .selection-panel { position: static; } .selected-list { max-height: none; display: block; } .empty-selection { min-height: 80px; } .plan-credits { margin-top: 16px; } .course-table td { padding-top: 14px; padding-bottom: 14px; } .student-stat { min-width: 110px; } .current-term { display: none; } }
