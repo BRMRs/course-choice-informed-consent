@@ -110,12 +110,24 @@ export const COURSES = [
   },
 ];
 
+export const FIT_MODEL = [
+  { label: '教学资源与班级容量', weight: 45 },
+  { label: '跨学院课程分布', weight: 30 },
+  { label: '可排时间匹配', weight: 15 },
+  { label: '个人兴趣与专业方向', weight: 10 },
+];
+
 export function getCourse(id) {
   return COURSES.find((course) => course.id === id);
 }
 
 const normalize = (value) => String(value ?? '').trim().toLowerCase();
 const recommendations = ['agri', 'stats', 'expert', 'ml'];
+
+export function isMachineLearningQuery(value) {
+  const term = normalize(value);
+  return term.includes('机器学习') || /machine\s+learning/.test(term);
+}
 
 /** Returns a new array; explicit sorting never adds recommendation-only matches. */
 export function filterCourses({
@@ -124,7 +136,7 @@ export function filterCourses({
   const term = normalize(query);
   const departmentTerm = normalize(department);
   const categoryTerm = normalize(category);
-  const machineLearningQuery = term.includes('机器学习') || /machine\s+learning/.test(term);
+  const machineLearningQuery = isMachineLearningQuery(term);
   const recommend = machineLearningQuery && sort === 'fit';
   const result = COURSES.filter((course) => {
     if (departmentTerm !== 'all' && normalize(course.department) !== departmentTerm) return false;

@@ -97,6 +97,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--blue); width: 
 .table-toolbar strong { color: #52637e; font-weight: 500; }
 .table-toolbar label { display: flex; align-items: center; gap: 7px; }
 .table-toolbar select { border-color: transparent; padding-left: 4px; min-height: 27px; }
+.ranking-notice { display: flex; align-items: center; gap: 8px; padding: 9px 20px; border-bottom: 1px solid #e7edf7; background: #f7f9fd; color: #6f7f97; font-size: 11px; }
+.ranking-notice svg { color: #6f8fc5; }
 .course-table { border-collapse: collapse; width: 100%; table-layout: auto; font-size: 12px; }
 .course-table thead { background: #f7f9fc; }
 .course-table th { font-size: 11px; font-weight: 500; color: #909aab; text-align: left; padding: 11px 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -185,6 +187,26 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--blue); width: 
 .receipt-meta { display: flex; gap: 40px; padding: 18px 25px; background: #fafbfd; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .receipt-meta span { display: block; font-size: 11px; color: #9ba5b4; margin-bottom: 5px; }
 .receipt-meta strong { font-size: 12px; font-weight: 500; color: #65738b; }
+.choice-audit { margin-top: 20px; }
+.audit-comparison { display: grid; grid-template-columns: 1fr 42px 1fr; align-items: center; padding: 24px; background: #fbfcfe; border-bottom: 1px solid var(--line); }
+.audit-comparison > div { padding: 17px 20px; border: 1px solid #e4e9f1; border-radius: 6px; background: #fff; }
+.audit-comparison > div.actual { border-color: #eadbbd; background: #fffbf3; }
+.audit-comparison span, .audit-comparison small { display: block; color: #8491a4; font-size: 11px; }
+.audit-comparison strong { display: block; margin: 5px 0 2px; color: #52647e; font-size: 28px; font-weight: 600; line-height: 1.2; }
+.audit-comparison .actual strong { color: #9b702a; }
+.audit-arrow { text-align: center; color: #a5afbd!important; font-size: 18px!important; }
+.audit-facts { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+.audit-facts div { padding: 18px 20px; border-right: 1px solid var(--line); }
+.audit-facts div:last-child { border-right: 0; }
+.audit-facts strong { display: block; color: #52637d; font-size: 19px; font-weight: 550; }
+.audit-facts span { display: block; margin-top: 4px; color: #909bad; font-size: 11px; }
+.audit-phases { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin: 0; padding: 0; }
+.audit-phases li { padding: 20px; border-right: 1px solid var(--line); }
+.audit-phases li:last-child { border-right: 0; }
+.audit-phases li > span { display: inline-block; margin-bottom: 11px; padding: 2px 6px; border-radius: 3px; background: #edf2fb; color: #6c83aa; font-size: 10px; }
+.audit-phases strong { display: block; color: #52637c; font-size: 13px; font-weight: 550; }
+.audit-phases p { margin-top: 7px; color: #8b97a8; font-size: 11px; line-height: 1.7; }
+.audit-outcome { display: flex; align-items: center; gap: 8px; padding: 15px 20px; border-top: 1px solid var(--line); background: #f2f9f5; color: #4f826d; font-size: 12px; }
 .record-section { margin-top: 20px; padding: 17px 22px; }
 .record-section summary { cursor: pointer; color: #5d6e86; font-size: 13px; }
 .record-section summary span { color: #a2adbd; font-size: 11px; margin-left: 10px; }
@@ -206,6 +228,16 @@ dialog > .alert { margin: 20px 24px; }
 .detail-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 17px 20px; padding: 22px 24px; background: #fafbfd; }
 .detail-facts span { display: block; font-size: 11px; color: #9da8b8; margin-bottom: 4px; }
 .detail-facts strong { font-size: 12px; font-weight: 450; color: #5c6c83; }
+.fit-model { margin: 18px 24px; padding: 13px 15px; border: 1px solid #e4e9f1; border-radius: 5px; background: #fbfcfe; }
+.fit-model summary { display: flex; justify-content: space-between; align-items: center; gap: 15px; cursor: pointer; color: #66758c; font-size: 12px; }
+.fit-model summary strong { color: #456db4; font-size: 14px; font-weight: 550; }
+.fit-model > p { margin: 13px 0 12px; color: #8996a8; font-size: 11px; }
+.fit-model dl { display: grid; gap: 9px; margin: 0; }
+.fit-model dl > div { display: grid; grid-template-columns: minmax(125px, 1fr) 1.3fr; align-items: center; gap: 12px; }
+.fit-model dt { color: #7a879b; font-size: 11px; }
+.fit-model dd { position: relative; height: 15px; margin: 0; overflow: hidden; border-radius: 2px; background: #edf1f6; }
+.fit-model dd i { display: block; height: 100%; background: #9bb6e8; }
+.fit-model dd span { position: absolute; inset: 0 5px 0 auto; color: #60728d; font-size: 9px; line-height: 15px; }
 .detail-section { margin: 21px 24px; }
 .detail-section h3 { margin-bottom: 10px; }
 .detail-section p, .detail-section ol { font-size: 13px; color: #7d8b9e; line-height: 1.9; margin: 6px 0; }
@@ -288,6 +320,7 @@ dialog .detail-section :is(textarea,select,input):focus { outline: 2px solid #8f
 .consent-dialog .procedure-steps li { min-width: 75px; }
 .dialog-description, .detail-section p, .checkbox-block, .radio-row { color: #5e6f87; }
 @media(max-width:760px) { header.topbar { height: auto; min-height: 60px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; gap: 10px; } header .top-actions { margin-left: auto; } .top-actions .button { font-size: 12px; min-height: 34px; } dialog .dialog-actions { flex-wrap: wrap; } .round-records { margin: 18px; } }
+@media(max-width:760px) { .ranking-notice { padding: 9px 15px; } .audit-comparison { grid-template-columns: 1fr; gap: 10px; padding: 15px; } .audit-arrow { transform: rotate(90deg); } .audit-facts { grid-template-columns: 1fr 1fr; } .audit-facts div:nth-child(2) { border-right: 0; } .audit-facts div:nth-child(-n+2) { border-bottom: 1px solid var(--line); } .audit-phases { grid-template-columns: 1fr; } .audit-phases li { border-right: 0; border-bottom: 1px solid var(--line); } .audit-phases li:last-child { border-bottom: 0; } .fit-model { margin-left: 18px; margin-right: 18px; } .fit-model dl > div { grid-template-columns: 1fr; gap: 4px; } }
 @media(min-width:1081px) {
   main { padding-top: 18px; }
   .breadcrumb { margin-bottom: 12px; }
