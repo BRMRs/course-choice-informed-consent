@@ -84,6 +84,8 @@ main { min-width: 0; padding: 23px 30px 18px; max-width: 1730px; width: 100%; ma
 .button.primary:hover { background: var(--blue-dark); }
 .button.secondary { background: #fff; }
 .button.quiet { border-color: transparent; background: transparent; color: #8b95a6; padding: 5px; font-size: 12px; }
+.button.scenario-top { color: #7c5a1c; background: #fff8e9; border-color: #f0dfb7; }
+.button.scenario-top:hover { background: #fff3d5; border-color: #e4c983; }
 .button.danger { background: #bd413c; color: #fff; border-color: #bd413c; }
 .link-button { border: 0; padding: 0; background: transparent; color: var(--blue); font-size: 12px; white-space: nowrap; }
 .link-button:hover { text-decoration: underline; }
@@ -287,6 +289,47 @@ legend { font-size: 14px; font-weight: 550; padding: 0 24px; margin-bottom: 7px;
 .cultivation-advice p { color: #ac956a; font-size: 12px; margin-top: 7px; }
 .advice-label { color: #b69b68; font-size: 11px; }
 .mobile-plan-bar { display: none; }
+.scenario-main { min-height: calc(100vh - 68px); padding: 42px 30px 24px; background: #f3f5f9; }
+.scenario-page { max-width: 1060px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 20px; align-items: start; }
+.scenario-hero, .scenario-board, .scenario-countdown, .scenario-result { grid-column: 1; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+.scenario-hero { padding: 34px 38px; }
+.scenario-kicker { color: #9a7a3e; font-size: 11px; letter-spacing: .08em; font-weight: 600; }
+.scenario-hero h1 { margin-top: 8px; font-size: 30px; }
+.scenario-hero p { max-width: 690px; margin-top: 13px; color: #76859a; font-size: 14px; line-height: 1.9; }
+.scenario-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
+.scenario-clock { grid-column: 2; grid-row: 1 / span 2; padding: 25px 22px; border: 1px solid #e7dbc2; border-radius: 8px; background: #fffbf3; text-align: center; }
+.scenario-clock span, .scenario-clock small { display: block; color: #a48b60; font-size: 11px; }
+.scenario-clock strong { display: block; margin: 10px 0 4px; color: #815e24; font-size: 30px; font-weight: 600; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+.scenario-countdown { padding: 48px 30px; text-align: center; }
+.scenario-countdown span { color: #8a97aa; font-size: 13px; }
+.scenario-countdown strong { display: block; margin: 10px 0 9px; color: #395b9d; font-size: 54px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.scenario-countdown p { color: #9aa6b6; font-size: 12px; }
+.scenario-board { overflow: hidden; }
+.scenario-board-head { display: flex; align-items: center; justify-content: space-between; padding: 21px 26px; border-bottom: 1px solid var(--line); }
+.scenario-board-head h2 { margin-top: 4px; font-size: 19px; }
+.live-dot { display: inline-flex; align-items: center; gap: 6px; color: #b13d36; font-size: 11px; font-weight: 650; }
+.live-dot::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #d34a42; box-shadow: 0 0 0 4px #fbe9e7; }
+.scenario-courses { display: grid; gap: 12px; padding: 21px 26px; }
+.scenario-course-card { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; gap: 17px; align-items: center; padding: 18px; border: 1px solid #e5eaf1; border-radius: 7px; background: #fff; }
+.scenario-course-card.target { background: #f8fbff; border-color: #dbe7fb; }
+.scenario-course-card.sold-out { background: #fbf8f8; border-color: #eadbd9; }
+.scenario-course-card h3 { margin-top: 8px; color: #3e4e67; font-size: 16px; }
+.scenario-course-card p { margin-top: 5px; color: #8a97a8; font-size: 11px; }
+.scenario-seat { text-align: right; }
+.scenario-seat strong { display: block; color: #566a87; font-size: 18px; font-variant-numeric: tabular-nums; }
+.scenario-seat span { color: #9ba6b5; font-size: 11px; }
+.scenario-course-card.sold-out .scenario-seat strong { color: #b0453e; }
+.scenario-interruption { display: flex; align-items: center; gap: 12px; margin: 0 26px 24px; padding: 14px 16px; border: 1px solid #eedfbe; border-radius: 6px; background: #fffaf0; color: #846d42; }
+.scenario-interruption > span { color: #ae8641; }
+.scenario-interruption div { flex: 1; }
+.scenario-interruption strong { font-size: 12px; font-weight: 600; }
+.scenario-interruption p { margin-top: 3px; font-size: 11px; color: #a08d6c; }
+.scenario-result { padding: 30px 32px; }
+.scenario-result h2 { font-size: 20px; color: #556783; }
+.scenario-result p { margin: 9px 0 19px; color: #8491a3; font-size: 13px; line-height: 1.8; }
+.scenario-result.warning { border-color: #ead9b9; background: #fffaf0; }
+.scenario-result.warning h2 { color: #8d6c31; }
+@media(max-width:760px) { .button.scenario-top { padding: 7px 9px; font-size: 11px; } .scenario-main { padding: 18px 14px 30px; } .scenario-page { display: block; } .scenario-hero, .scenario-board, .scenario-countdown, .scenario-result { margin-bottom: 14px; } .scenario-clock { margin-bottom: 14px; } .scenario-hero { padding: 25px 20px; } .scenario-hero h1 { font-size: 24px; } .scenario-hero p { font-size: 13px; } .scenario-countdown { padding: 38px 20px; } .scenario-countdown strong { font-size: 45px; } .scenario-board-head { padding: 17px 18px; } .scenario-courses { padding: 15px 18px; } .scenario-course-card { grid-template-columns: 1fr auto; gap: 11px; } .scenario-course-card .scenario-seat { text-align: right; } .scenario-course-card .button { grid-column: 1 / -1; width: 100%; } .scenario-interruption { margin: 0 18px 18px; align-items: flex-start; flex-wrap: wrap; } .scenario-interruption .button { margin-left: 28px; } }
 @media(max-width:760px) {
   body { padding-bottom: 76px; }
   .breadcrumb { display: none; }
