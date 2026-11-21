@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COURSES, totalCredits } from '../catalog.mjs';
+import { COURSES, getCourse, filterCourses, totalCredits } from '../catalog.mjs';
 import {
-  MIN_CREDITS, MAX_CREDITS, REASONS,
+  MIN_CREDITS, MAX_CREDITS, REASONS, OBJECTIONS, APPEAL_MIN, appealLength, WITHDRAW_REASONS, FILING_STATEMENT,
   createState, restoreState, planSummary, transition,
 } from '../state.mjs';
 
@@ -41,11 +41,20 @@ function run(state, actions) {
   return actions.reduce((current, action) => act(current, action), state);
 }
 
-function qualified() {
-  return run(createState(), [
-    { type: 'ADD', id: 'ml' },
-    { type: 'CONSENT_READ' },
-    { type: 'CONSENT_REASON', reason: REASONS[0] },
+const appeal = '我已认真核对个人培养计划并了解推荐课程内容，仍决定按照个人学习方向选择本轮课程。';
+const appealActions = [
+  { type: 'CONSENT_OPEN_APPEAL' },
+  { type: 'CONSENT_APPEAL', text: appeal, acknowledged: true },
+];
+const permit = {
+  type: 'WITHDRAW_REQUEST', reason: WITHDRAW_REASONS[0],
+  courseCode: getCourse('agri').code, benefits: true, personal: true, at: 15,
+};
+
+function qualified(state = createState()) {
+  return run(state, [
+    { type: 'ADD', id: 'ml' }, { type: 'CONSENT_READ' },
+    { type: 'CONSENT_REASON', reason: REASONS[0] }, ...appealActions,
     { type: 'CONSENT_ANSWER', answer: 'environment' },
     { type: 'CONSENT_CONFIRM', at: 10 },
   ]);
@@ -53,14 +62,33 @@ function qualified() {
 
 function withdraw(state) {
   return run(state, [
-    { type: 'DROP', id: 'agri' },
-    { type: 'WITHDRAW_ACK', checked: true },
+    { type: 'DROP', id: 'agri' }, permit,
+    { type: 'DROP', id: 'agri' }, { type: 'WITHDRAW_ACK', checked: true },
     { type: 'WITHDRAW_CONFIRM', holdMs: 2000, at: 20 },
   ]);
 }
 
+function beginFiling(state = withdraw(qualified())) {
+  const reviewed = act(state, { type: 'REVIEW' });
+  return act(reviewed, { type: 'SUBMIT', receiptId: 'deferred', expectedCourses: reviewed.draft });
+}
+
+function completeFiling(state, at = 90) {
+  return run(state, [
+    { type: 'FILING_DECLARE', confirmations: [true, true, true] },
+    { type: 'FILING_STATEMENT', text: FILING_STATEMENT, at },
+  ]);
+}
+
 function submit(state, receiptId = 'receipt-1', at = 100) {
-  return run(state, [{ type: 'REVIEW' }, { type: 'SUBMIT', receiptId, at, expectedCourses: state.draft }]);
+  let next = run(state, [{ type: 'REVIEW' }, { type: 'SUBMIT', receiptId, at, expectedCourses: state.draft }]);
+  if (next.pending === 'filing') {
+    next = act(completeFiling(next, at - 1), { type: 'FILING_RETURN' });
+    next = act(next, { type: 'SUBMIT', receiptId, at, expectedCourses: next.draft });
+  }
+  assert.equal(next.editing, false, 'legal submission path must terminate');
+  assert.ok(next.submitted);
+  return next;
 }
 
 test('new states are independent, restorable and summarize an empty plan', () => {
@@ -152,12 +180,15 @@ test('ML opens consent without selecting either course; closing preserves comple
   assert.deepEqual(state.draft, []);
   state = run(state, [
     { type: 'CONSENT_READ' },
-    { type: 'CONSENT_REASON', reason: REASONS[1] },
+    { type: 'CONSENT_REASON', reason: REASONS[1] }, ...appealActions,
     { type: 'CONSENT_ANSWER', answer: 'wrong' },
     { type: 'CANCEL_PROCEDURE' },
   ]);
   assert.equal(state.pending, null);
-  assert.deepEqual(state.consent, { read: true, reason: REASONS[1], passed: false, attempts: 1, approved: false });
+  assert.equal(state.consent.reason, REASONS[1]);
+  assert.equal(state.consent.appeal, appeal);
+  assert.equal(state.consent.appealFiled, true);
+  assert.equal(state.consent.attempts, 1);
   state = act(state, { type: 'ADD', id: 'ml' });
   assert.equal(state.pending, 'consent');
   assert.equal(state.consent.attempts, 1);
@@ -184,7 +215,7 @@ test('consent prerequisites block skipping, permit incorrect-answer retries and 
   assert.equal(state.consent.approved, false);
   state = run(state, [{ type: 'CONSENT_READ' }, { type: 'CONSENT_REASON', reason: 'invalid reason' }]);
   assert.equal(state.consent.reason, '');
-  state = act(state, { type: 'CONSENT_REASON', reason: REASONS[2] });
+  state = run(state, [{ type: 'CONSENT_REASON', reason: REASONS[2] }, ...appealActions]);
   for (const answer of ['wrong', 'student']) {
     state = act(state, { type: 'CONSENT_ANSWER', answer });
     assert.equal(state.consent.passed, false);
@@ -206,38 +237,35 @@ test('consent prerequisites block skipping, permit incorrect-answer retries and 
   assert.deepEqual(planSummary(state), { count: 2, credits: 6, valid: true, completeness: 100, guaranteed: true, periods: 4 });
 });
 
-test('an already selected agriculture course retains its student origin when ML is approved', () => {
-  const state = run(act(createState(), { type: 'ADD', id: 'agri' }), [
-    { type: 'ADD', id: 'ml' }, { type: 'CONSENT_READ' },
-    { type: 'CONSENT_REASON', reason: REASONS[0] },
-    { type: 'CONSENT_ANSWER', answer: 'environment' }, { type: 'CONSENT_CONFIRM' },
-  ]);
+test('preselected agriculture becomes a guarantee when ML is confirmed and cannot be directly dropped', () => {
+  const state = qualified(act(createState(), { type: 'ADD', id: 'agri' }));
   assert.deepEqual(state.draft, ['agri', 'ml']);
-  assert.equal(state.origins.agri, 'student');
+  assert.equal(state.origins.agri, 'guarantee');
   assert.equal(state.guarantee.ever, true);
-  assert.equal(state.events.filter((event) => event.type === 'guarantee').length, 0);
+  assert.equal(state.events.filter(e => e.type === 'guarantee').length, 1);
   const dropped = act(state, { type: 'DROP', id: 'agri' });
-  assert.deepEqual(dropped.draft, ['ml']);
-  assert.equal(dropped.pending, null);
+  assert.deepEqual(dropped.draft, state.draft);
+  assert.equal(dropped.pending, 'withdrawal');
+  assert.deepEqual(withdraw(state).draft, ['ml']);
 });
 
-test('ML still enters when its first guarantee allocation would exceed the credit limit, without later backfill', () => {
-  let state = run(createState(), ['robotics', 'stats', 'expert', 'ethics'].map((id) => ({ type: 'ADD', id })));
-  state = run(state, [
-    { type: 'ADD', id: 'ml' }, { type: 'CONSENT_READ' },
-    { type: 'CONSENT_REASON', reason: REASONS[0] },
-    { type: 'CONSENT_ANSWER', answer: 'environment' }, { type: 'CONSENT_CONFIRM' },
-  ]);
+test('first ML selection reserves guarantee credits and cannot bypass allocation by filling the credit limit', () => {
+  let state = run(createState(), ['robotics', 'stats', 'expert', 'ethics'].map(id => ({ type: 'ADD', id })));
+  const blocked = act(state, { type: 'ADD', id: 'ml' });
+  assert.equal(totalCredits(state.draft) + getCourse('ml').credits, MAX_CREDITS);
+  assert.deepEqual(blocked.draft, state.draft);
+  assert.equal(blocked.pending, null);
+  assert.deepEqual(blocked.guarantee, { ever: false, removed: false });
+  assert.match(blocked.notice, /预留/);
+  state = act(state, { type: 'DROP', id: 'robotics' });
+  state = qualified(state);
   assert.equal(totalCredits(state.draft), MAX_CREDITS);
-  assert.ok(state.draft.includes('ml'));
-  assert.ok(!state.draft.includes('agri'));
-  assert.deepEqual(state.guarantee, { ever: true, removed: true });
-  state = run(state, [{ type: 'DROP', id: 'robotics' }, { type: 'DROP', id: 'ml' }, { type: 'ADD', id: 'ml' }]);
-  assert.ok(!state.draft.includes('agri'));
+  assert.equal(state.origins.agri, 'guarantee');
+  assert.deepEqual(state.guarantee, { ever: true, removed: false });
 });
 
 test('withdrawal requires explicit acknowledgement and a finite hold of at least 2000ms', () => {
-  const ready = act(qualified(), { type: 'DROP', id: 'agri' });
+  const ready = run(qualified(), [{ type: 'DROP', id: 'agri' }, permit, { type: 'DROP', id: 'agri' }]);
   assert.equal(ready.pending, 'withdrawal');
   assert.equal(ready.withdrawalAck, false);
   assert.ok(ready.draft.includes('agri'));
@@ -299,7 +327,7 @@ test('ML alone and multiple ordinary courses both produce valid independent subm
     assert.equal(result.editing, false);
     assert.equal(result.pending, null);
     assert.equal(result.review, null);
-    assert.deepEqual(result.submitted, { id: 'receipt-1', at: 100, courses: state.draft, credits: totalCredits(state.draft), revision: 1 });
+    assert.deepEqual(result.submitted, { id: 'receipt-1', at: 100, courses: state.draft, credits: totalCredits(state.draft), revision: 1, filingId: result.filing.number });
     assert.notEqual(result.submitted.courses, result.draft);
     assert.deepEqual(result.history, []);
     if (!state.draft.includes('ml')) assert.equal(result.consent.approved, false);
@@ -339,7 +367,7 @@ test('a stale review from another tab cannot submit a newer reviewed plan', () =
   const submitted = act(blocked, { type: 'SUBMIT', receiptId: 'current-tab', expectedCourses: expectedB, at: 100 });
   assert.equal(submitted.editing, false);
   assert.deepEqual(submitted.submitted, {
-    id: 'current-tab', at: 100, courses: expectedB, credits: 5, revision: 1,
+    id: 'current-tab', at: 100, courses: expectedB, credits: 5, revision: 1, filingId: null,
   });
 });
 
@@ -385,7 +413,7 @@ test('EDIT preserves submitted snapshots; later revisions append exactly the pri
   assert.deepEqual(editing.submitted, firstReceipt);
   const second = submit(editing, 'second', 200);
   assert.deepEqual(second.history, [firstReceipt]);
-  assert.deepEqual(second.submitted, { id: 'second', at: 200, courses: ['agri', 'stats'], credits: 5, revision: 2 });
+  assert.deepEqual(second.submitted, { id: 'second', at: 200, courses: ['agri', 'stats'], credits: 5, revision: 2, filingId: null });
   const secondReceipt = structuredClone(second.submitted);
   const third = submit(run(second, [{ type: 'EDIT' }, { type: 'DROP', id: 'agri' }, { type: 'ADD', id: 'expert' }]), 'third', 300);
   assert.deepEqual(third.history, [firstReceipt, secondReceipt]);
@@ -506,4 +534,326 @@ test('restore rejects a history whose revisions cannot have been produced by suc
   const corrupt = structuredClone(second);
   corrupt.history[0].revision = 99;
   assert.throws(() => restoreState(corrupt), TypeError, 'history must begin at revision 1, not 99');
+});
+
+for (const reason of REASONS) {
+  test(`every refusal branch objects and requires appeal: ${reason}`, () => {
+    let state = run(createState(), [
+      { type: 'ADD', id: 'ml' }, { type: 'CONSENT_READ' }, { type: 'CONSENT_REASON', reason },
+    ]);
+    assert.equal(typeof OBJECTIONS[reason], 'string');
+    assert.ok(OBJECTIONS[reason].length > 20);
+    assert.equal(new Set(Object.values(OBJECTIONS)).size, REASONS.length);
+    state = act(state, { type: 'CONSENT_ANSWER', answer: 'environment' });
+    assert.equal(state.consent.attempts, 0);
+    assert.equal(state.consent.passed, false);
+    state = act(state, { type: 'CONSENT_CONFIRM' });
+    assert.deepEqual(state.draft, []);
+    state = act(state, { type: 'CONSENT_OPEN_APPEAL' });
+    assert.equal(state.consent.appealOpen, true);
+    assert.match(state.events.at(-1).label, new RegExp(reason));
+    assert.equal(state.events.at(-1).type, 'objection');
+    state = run(state, [appealActions[1], { type: 'CONSENT_ANSWER', answer: 'environment' }]);
+    assert.equal(state.consent.passed, true);
+    assert.equal(state.consent.approved, false);
+    assert.deepEqual(state.draft, []);
+    state = act(state, { type: 'CONSENT_CONFIRM' });
+    assert.deepEqual(state.draft, ['ml', 'agri']);
+    assert.equal(state.consent.reason, reason);
+    assert.equal(state.consent.appeal, appeal);
+    assert.equal(state.origins.agri, 'guarantee');
+  });
+}
+
+test('appeal needs opening, thirty non-whitespace characters and strict acknowledgement', () => {
+  let state = run(createState(), [
+    { type: 'ADD', id: 'ml' }, { type: 'CONSENT_READ' }, { type: 'CONSENT_REASON', reason: REASONS[0] },
+  ]);
+  assert.equal(act(state, appealActions[1]).consent.appealFiled, false);
+  state = act(state, { type: 'CONSENT_OPEN_APPEAL' });
+  assert.equal(APPEAL_MIN, 30);
+  assert.equal(appealLength(' 甲\t乙\n😀　'), 3);
+  for (const action of [
+    { text: '字'.repeat(29), acknowledged: true },
+    { text: ` ${'字 \n\t'.repeat(29)} `, acknowledged: true },
+    { text: ' '.repeat(100), acknowledged: true },
+    { text: 123, acknowledged: true },
+    ...[false, undefined, 'true', 1].map(acknowledged => ({ text: appeal, acknowledged })),
+  ]) {
+    const blocked = act(state, { type: 'CONSENT_APPEAL', ...action });
+    assert.equal(blocked.consent.appealFiled, false);
+    assert.equal(act(blocked, { type: 'CONSENT_ANSWER', answer: 'environment' }).consent.attempts, 0);
+  }
+  const accepted = act(state, { type: 'CONSENT_APPEAL', text: ` ${'😀'.repeat(30)} `, acknowledged: true });
+  assert.equal(accepted.consent.appealFiled, true);
+  assert.equal(appealLength(accepted.consent.appeal), 30);
+});
+
+test('changing a refusal restarts the objection branch and cannot erase an already filed statement', () => {
+  let state = run(createState(), [
+    { type: 'ADD', id: 'ml' }, { type: 'CONSENT_READ' },
+    { type: 'CONSENT_REASON', reason: REASONS[0] }, { type: 'CONSENT_OPEN_APPEAL' },
+    { type: 'CONSENT_CHANGE_REASON' },
+  ]);
+  assert.equal(state.consent.reason, '');
+  assert.equal(state.consent.appealOpen, false);
+  assert.equal(act(state, appealActions[1]).consent.appealFiled, false);
+  state = run(state, [{ type: 'CONSENT_REASON', reason: REASONS[1] }, ...appealActions]);
+  assert.deepEqual(act(state, { type: 'CONSENT_CHANGE_REASON' }).consent, state.consent);
+});
+
+test('filling credits during consent prevents entry and freeing credits allows reopening and confirmation', () => {
+  let state = run(createState(), [
+    { type: 'ADD', id: 'ml' }, { type: 'CONSENT_READ' },
+    { type: 'CONSENT_REASON', reason: REASONS[0] }, ...appealActions,
+    { type: 'CONSENT_ANSWER', answer: 'environment' },
+    { type: 'ADD', id: 'robotics' }, { type: 'ADD', id: 'stats' },
+    { type: 'ADD', id: 'expert' }, { type: 'ADD', id: 'ethics' },
+    { type: 'ADD', id: 'ml' }, { type: 'CONSENT_CONFIRM' },
+  ]);
+  assert.ok(!state.draft.includes('ml'));
+  assert.ok(!state.guarantee.ever);
+  state = act(state, { type: 'DROP', id: 'robotics' });
+  state = act(state, { type: 'ADD', id: 'ml' });
+  assert.equal(state.pending, 'consent');
+  assert.equal(state.consent.passed, true);
+  assert.ok(!state.draft.includes('ml'));
+  state = act(state, { type: 'CONSENT_CONFIRM' });
+  assert.ok(state.draft.includes('ml'));
+  assert.equal(state.origins.agri, 'guarantee');
+});
+
+test('withdrawal request validates every field and strict confirmations independently', () => {
+  const ready = act(qualified(), { type: 'DROP', id: 'agri' });
+  for (const patch of [
+    { reason: undefined }, { reason: 'arbitrary' }, { courseCode: '' }, { courseCode: 'CS3102' },
+    { benefits: false }, { benefits: 'true' }, { personal: false }, { personal: 1 },
+  ]) {
+    const blocked = act(ready, { ...permit, ...patch });
+    assert.equal(blocked.withdrawal.requested, false);
+    assert.deepEqual(blocked.draft, ready.draft);
+    assert.equal(blocked.pending, 'withdrawal');
+    assert.ok(blocked.notice);
+  }
+  for (const reason of WITHDRAW_REASONS) {
+    const accepted = act(ready, { ...permit, reason, courseCode: ` ${getCourse('agri').code.toLowerCase()} ` });
+    assert.equal(accepted.withdrawal.requested, true);
+    assert.equal(accepted.withdrawal.reason, reason);
+    assert.equal(accepted.withdrawal.courseCode, getCourse('agri').code);
+  }
+});
+
+test('withdrawal permission closes the application without removing a course or claiming execution', () => {
+  const ready = act(qualified(), { type: 'DROP', id: 'agri' });
+  const permitted = act(ready, permit);
+  assert.equal(permitted.withdrawal.number, 'CX-15');
+  assert.equal(permitted.pending, null);
+  assert.deepEqual(permitted.draft, ['ml', 'agri']);
+  assert.equal(permitted.guarantee.removed, false);
+  assert.equal(permitted.events.at(-1).type, 'withdrawal-permit');
+  assert.equal(permitted.events.filter(e => e.type === 'withdrawal').length, 0);
+  assert.match(permitted.notice, /仍在/);
+  const blocked = run(permitted, [{ type: 'WITHDRAW_ACK', checked: true }, { type: 'WITHDRAW_CONFIRM', holdMs: 2000 }]);
+  assert.deepEqual(blocked.draft, permitted.draft);
+  const reopened = run(restoreState(JSON.parse(JSON.stringify(permitted))), [
+    { type: 'DROP', id: 'agri' }, { type: 'WITHDRAW_ACK', checked: true },
+    { type: 'WITHDRAW_CONFIRM', holdMs: 2000 },
+  ]);
+  assert.deepEqual(reopened.draft, ['ml']);
+  assert.equal(reopened.events.filter(e => e.type === 'withdrawal').length, 1);
+});
+
+test('acknowledgement and long hold cannot execute a withdrawal without permission', () => {
+  const ready = run(qualified(), [{ type: 'DROP', id: 'agri' }, { type: 'WITHDRAW_ACK', checked: true }]);
+  const blocked = act(ready, { type: 'WITHDRAW_CONFIRM', holdMs: 10000 });
+  assert.equal(blocked.withdrawal.requested, false);
+  assert.deepEqual(blocked.draft, ['ml', 'agri']);
+  assert.equal(blocked.guarantee.removed, false);
+});
+
+test('first submission of a valid ML-only plan opens filing without a receipt or submission event', () => {
+  const state = withdraw(qualified());
+  assert.equal(planSummary(state).valid, true);
+  const filing = beginFiling(state);
+  assert.equal(filing.pending, 'filing');
+  assert.equal(filing.review, null);
+  assert.equal(filing.editing, true);
+  assert.equal(filing.submitted, null);
+  assert.deepEqual(filing.history, []);
+  assert.deepEqual(filing.filing.courses, ['ml']);
+  assert.equal(filing.filing.completed, false);
+  assert.equal(filing.filing.number, null);
+  assert.equal(filing.events.at(-1).type, 'filing-required');
+  assert.equal(filing.events.filter(e => e.type === 'submit').length, 0);
+});
+
+test('filing declarations require exactly three boolean true values', () => {
+  const filing = beginFiling();
+  for (const confirmations of [undefined, true, [], [true, true], [true, true, true, true], [true, false, true], [true, true, 1], ['true', true, true]]) {
+    const blocked = act(filing, { type: 'FILING_DECLARE', confirmations });
+    assert.equal(blocked.filing.stage, 0);
+    assert.deepEqual(blocked.filing.declarations, [false, false, false]);
+    assert.equal(blocked.submitted, null);
+  }
+  const accepted = act(filing, { type: 'FILING_DECLARE', confirmations: [true, true, true] });
+  assert.equal(accepted.filing.stage, 1);
+  assert.deepEqual(accepted.filing.declarations, [true, true, true]);
+  assert.equal(accepted.filing.completed, false);
+});
+
+test('filing statement requires the exact phrase after declarations and only issues a filing ID', () => {
+  const initial = beginFiling();
+  assert.equal(act(initial, { type: 'FILING_STATEMENT', text: FILING_STATEMENT }).filing.completed, false);
+  const declared = act(initial, { type: 'FILING_DECLARE', confirmations: [true, true, true] });
+  assert.equal(FILING_STATEMENT, '我仍坚持当前选课方案');
+  for (const text of [undefined, 123, '', '我坚持当前选课方案', `${FILING_STATEMENT}。`, '我仍坚持 当前选课方案']) {
+    assert.equal(act(declared, { type: 'FILING_STATEMENT', text }).filing.completed, false);
+  }
+  const complete = act(declared, { type: 'FILING_STATEMENT', text: ` ${FILING_STATEMENT}\n`, at: 88 });
+  assert.equal(complete.filing.number, 'BA-88');
+  assert.equal(complete.filing.stage, 2);
+  assert.equal(complete.pending, 'filing');
+  assert.equal(complete.submitted, null);
+  assert.equal(complete.editing, true);
+  assert.equal(complete.events.at(-1).type, 'filing');
+});
+
+test('filing cannot skip return or final submission; its finite exit yields only ML and a filing-linked receipt', () => {
+  const filing = beginFiling();
+  assert.equal(act(filing, { type: 'FILING_RETURN' }).pending, 'filing');
+  const completed = completeFiling(filing);
+  const premature = act(completed, { type: 'SUBMIT', receiptId: 'too-early', expectedCourses: completed.draft });
+  assert.equal(premature.submitted, null);
+  const returned = act(premature, { type: 'FILING_RETURN' });
+  assert.equal(returned.pending, 'review');
+  assert.deepEqual(returned.review, ['ml']);
+  assert.equal(returned.submitted, null);
+  const final = act(returned, { type: 'SUBMIT', receiptId: 'final', at: 100, expectedCourses: ['ml'] });
+  assert.deepEqual(final.submitted, { id: 'final', at: 100, courses: ['ml'], credits: 3, revision: 1, filingId: 'BA-90' });
+  assert.equal(final.editing, false);
+  assert.equal(final.events.filter(e => e.type === 'filing-required').length, 1);
+  assert.equal(final.events.filter(e => e.type === 'submit').length, 1);
+});
+
+test('closing and refreshing incomplete filing preserves declarations and resumes at the same stage', () => {
+  const declared = act(beginFiling(), { type: 'FILING_DECLARE', confirmations: [true, true, true] });
+  const closed = act(declared, { type: 'CANCEL_PROCEDURE' });
+  assert.equal(closed.pending, null);
+  assert.equal(act(closed, { type: 'FILING_STATEMENT', text: FILING_STATEMENT }).filing.completed, false);
+  const reopened = beginFiling(restoreState(JSON.parse(JSON.stringify(closed))));
+  assert.deepEqual(reopened.filing, declared.filing);
+  const completed = act(reopened, { type: 'FILING_STATEMENT', text: FILING_STATEMENT, at: 91 });
+  assert.equal(submit(act(completed, { type: 'CANCEL_PROCEDURE' })).submitted.filingId, 'BA-91');
+});
+
+test('closing completed filing and reviewing again does not demand another filing', () => {
+  const complete = completeFiling(beginFiling());
+  const closed = act(complete, { type: 'CANCEL_PROCEDURE' });
+  const result = submit(restoreState(JSON.parse(JSON.stringify(closed))));
+  assert.equal(result.submitted.filingId, complete.filing.number);
+  assert.equal(result.events.filter(e => e.type === 'filing-required').length, 1);
+});
+
+test('adding or dropping courses invalidates filing even when the original plan is later restored', () => {
+  const complete = act(completeFiling(beginFiling()), { type: 'FILING_RETURN' });
+  for (const action of [{ type: 'ADD', id: 'stats' }, { type: 'DROP', id: 'ml' }]) {
+    const changed = act(complete, action);
+    assert.equal(changed.filing.completed, false);
+    assert.equal(changed.filing.number, null);
+    assert.equal(changed.filing.courses, null);
+    assert.equal(changed.pending, null);
+    assert.equal(changed.review, null);
+  }
+  const reverted = run(complete, [{ type: 'ADD', id: 'stats' }, { type: 'DROP', id: 'stats' }]);
+  const required = beginFiling(reverted);
+  assert.equal(required.pending, 'filing');
+  assert.equal(required.filing.completed, false);
+  assert.equal(required.events.filter(e => e.type === 'filing-required').length, 2);
+});
+
+test('old expectedCourses cannot trigger filing or submit a changed filed plan', () => {
+  const old = act(withdraw(qualified()), { type: 'REVIEW' });
+  const changed = run(old, [{ type: 'ADD', id: 'stats' }, { type: 'REVIEW' }]);
+  const blocked = act(changed, { type: 'SUBMIT', receiptId: 'stale', expectedCourses: old.review });
+  assert.equal(blocked.pending, 'review');
+  assert.equal(blocked.filing.courses, null);
+  assert.deepEqual(blocked.events, changed.events);
+  const filing = act(blocked, { type: 'SUBMIT', receiptId: 'current', expectedCourses: changed.review });
+  const returned = act(completeFiling(filing), { type: 'FILING_RETURN' });
+  const stale = act(returned, { type: 'SUBMIT', receiptId: 'stale-again', expectedCourses: old.review });
+  assert.equal(stale.submitted, null);
+  assert.deepEqual(stale.events, returned.events);
+  const final = act(stale, { type: 'SUBMIT', receiptId: 'valid', expectedCourses: returned.review });
+  assert.deepEqual(final.submitted.courses, ['ml', 'stats']);
+});
+
+test('unchanged filed resubmission reuses filing while changed revisions preserve receipt history', () => {
+  const first = submit(withdraw(qualified()), 'first', 100);
+  const second = submit(act(first, { type: 'EDIT' }), 'second', 200);
+  assert.equal(second.submitted.filingId, first.submitted.filingId);
+  assert.deepEqual(second.history, [first.submitted]);
+  assert.equal(second.events.filter(e => e.type === 'filing-required').length, 1);
+  const editing = run(second, [{ type: 'EDIT' }, { type: 'ADD', id: 'stats' }]);
+  const deferred = beginFiling(editing);
+  assert.deepEqual(deferred.submitted, second.submitted);
+  assert.deepEqual(deferred.history, [first.submitted]);
+  const third = submit(deferred, 'third', 300);
+  assert.deepEqual(third.history, [first.submitted, second.submitted]);
+  assert.equal(third.submitted.revision, 3);
+  assert.notEqual(third.submitted.filingId, first.submitted.filingId);
+  assert.deepEqual(third.submitted.courses, ['ml', 'stats']);
+});
+
+test('separate new states replay all three procedures without overwriting a completed experience', () => {
+  const saved = submit(withdraw(qualified()));
+  const snapshot = JSON.stringify(saved);
+  const fresh = createState();
+  assert.equal(fresh.version, 3);
+  assert.equal(fresh.consent.approved, false);
+  assert.equal(fresh.withdrawal.requested, false);
+  assert.equal(fresh.filing.completed, false);
+  assert.equal(fresh.submitted, null);
+  const next = beginFiling(withdraw(qualified(fresh)));
+  assert.equal(next.pending, 'filing');
+  assert.equal(next.submitted, null);
+  assert.equal(JSON.stringify(saved), snapshot);
+  assert.deepEqual(restoreState(JSON.parse(snapshot)), saved);
+});
+
+test('ordinary search and filters still return selectable matches without changing any plan', () => {
+  const state = createState();
+  for (const query of ['教育统计', 'EDU2106', '陈知远']) {
+    assert.deepEqual(filterCourses({ query }).map(c => c.id), ['stats']);
+  }
+  const available = filterCourses({ department: '计算机学院', availableOnly: true, sort: 'code' });
+  assert.deepEqual(available.map(c => c.id), ['ml']);
+  assert.ok(filterCourses({ category: '通识选修' }).every(c => c.category === '通识选修'));
+  assert.deepEqual(filterCourses({ query: 'not-a-course' }), []);
+  assert.deepEqual(act(state, { type: 'ADD', id: filterCourses({ query: 'EDU2106' })[0].id }).draft, ['stats']);
+  assert.deepEqual(state.draft, []);
+});
+
+test('restore rejects malformed v3 appeal, withdrawal and filing records', () => {
+  const cases = [
+    [createState(), s => { s.consent.appealOpen = true; }],
+    [createState(), s => { s.consent.appeal = null; }],
+    [qualified(), s => { s.consent.appealAcknowledged = false; }],
+    [qualified(), s => { s.consent.appeal = '短'; }],
+    [qualified(), s => { s.consent.appealFiled = false; }],
+    [withdraw(qualified()), s => { s.withdrawal.courseCode = 'CS3102'; }],
+    [withdraw(qualified()), s => { s.withdrawal.benefits = false; }],
+    [withdraw(qualified()), s => { s.withdrawal.personal = false; }],
+    [beginFiling(), s => { s.filing.declarations = [true, true]; }],
+    [beginFiling(), s => { s.filing.stage = 1; }],
+    [beginFiling(), s => { s.filing.courses = ['stats']; }],
+    [completeFiling(beginFiling()), s => { s.filing.statement += '。'; }],
+    [completeFiling(beginFiling()), s => { s.filing.number = ''; }],
+    [completeFiling(beginFiling()), s => { s.filing.completed = false; }],
+  ];
+  for (const [base, mutate] of cases) {
+    const corrupted = structuredClone(base);
+    mutate(corrupted);
+    assert.throws(() => restoreState(corrupted), TypeError);
+    assert.throws(() => transition(corrupted, { type: 'DISMISS_NOTICE' }), TypeError);
+  }
 });
