@@ -258,6 +258,9 @@ function render(preserveInputs = false) {
   else if (dialogKind?.type === 'procedure') closeDialog();
   else if (dialogKind?.type === 'detail') courseDetails(dialogKind.id);
   restoreInputs(inputs);
+  const appealInput = document.querySelector('#appeal-text');
+  const appealCount = document.querySelector('#appeal-count');
+  if (appealInput && appealCount) appealCount.textContent = String(appealLength(appealInput.value));
   if (focusedId && document.getElementById(focusedId)) document.getElementById(focusedId).focus({ preventScroll: true });
 }
 
