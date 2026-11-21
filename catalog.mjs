@@ -39,7 +39,7 @@ export const COURSES = [
   {
     id: 'databases', code: 'CS2204', name: '数据库系统实践',
     department: '计算机学院', category: '专业选修', teacher: '赵文清',
-    credits: 3, capacity: 60, enrolled: 60, fit: 86,
+    credits: 3, capacity: 60, enrolled: 60, fit: 86, eligibleFrom: 2,
     room: '信息楼 406机房', day: 1, start: 5, duration: 2, weeks: '1—16周',
     description: '从关系模型到事务处理，使用 SQL 完成小型业务数据库的设计与实现。',
     syllabus: ['关系模型与 SQL 查询', '数据库设计与索引', '事务处理与应用开发'],
@@ -75,7 +75,7 @@ export const COURSES = [
   {
     id: 'ecology', code: 'ENV2103', name: '城市生态观察',
     department: '环境学院', category: '公共选修', teacher: '叶青岚',
-    credits: 2, capacity: 40, enrolled: 28, fit: 78,
+    credits: 2, capacity: 40, enrolled: 28, fit: 78, eligibleFrom: 2,
     room: '环境楼 108', day: 5, start: 5, duration: 2, weeks: '1—16周',
     description: '以校园及周边绿地为样地，学习城市生境调查、物种记录和生态观察方法。',
     syllabus: ['城市生境与调查规范', '物种记录与样方观察', '校园生态调查报告'],

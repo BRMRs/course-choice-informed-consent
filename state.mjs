@@ -116,6 +116,7 @@ export function transition(state, action) {
     if (!next.editing) { block('本轮方案已提交。如需更改，请先点击“调整选课”。'); return; }
     if (next.draft.includes(id)) { block('该教学班已在待提交方案中。'); return; }
     if (course.enrolled >= course.capacity) { block('该教学班名额已满，请选择其他教学班。'); return; }
+    if (course.eligibleFrom && course.eligibleFrom > 1) { block(`该课程建议大${course.eligibleFrom}及以上年级修读，当前学生身份暂不可选。`); return; }
     const conflictId = next.draft.find(other => conflicts(course, getCourse(other)));
     if (conflictId) { block(`与《${getCourse(conflictId).name}》上课时间冲突。`); return; }
     if (totalCredits([...next.draft, id]) > MAX_CREDITS) { block(`本轮最多可选 ${MAX_CREDITS} 学分，请先调整待提交方案。`); return; }

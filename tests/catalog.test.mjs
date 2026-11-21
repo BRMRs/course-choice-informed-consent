@@ -12,7 +12,8 @@ test('twelve complete courses have unique identities and valid timetable/capacit
     'capacity', 'enrolled', 'fit', 'room', 'day', 'start', 'duration', 'weeks',
     'description', 'syllabus', 'assessment'];
   for (const course of COURSES) {
-    assert.deepEqual(Object.keys(course).sort(), [...fields].sort());
+    assert.deepEqual(Object.keys(course).sort(), [...fields, ...(course.eligibleFrom ? ['eligibleFrom'] : [])].sort());
+    if (course.eligibleFrom) assert.ok(Number.isInteger(course.eligibleFrom) && course.eligibleFrom >= 2);
     for (const field of ['id', 'code', 'name', 'department', 'teacher', 'room', 'description', 'assessment']) {
       assert.ok(typeof course[field] === 'string' && course[field].trim().length > 0);
     }

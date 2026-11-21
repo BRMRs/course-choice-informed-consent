@@ -292,6 +292,7 @@ legend { font-size: 14px; font-weight: 550; padding: 0 24px; margin-bottom: 7px;
 .scenario-main { min-height: calc(100vh - 68px); padding: 42px 30px 24px; background: #f3f5f9; }
 .scenario-page { max-width: 1060px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 20px; align-items: start; }
 .scenario-hero, .scenario-board, .scenario-countdown, .scenario-result { grid-column: 1; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+.course-stage { color: #9aa6b6; font-size: 11px; }
 .scenario-hero { padding: 34px 38px; }
 .scenario-kicker { color: #9a7a3e; font-size: 11px; letter-spacing: .08em; font-weight: 600; }
 .scenario-hero h1 { margin-top: 8px; font-size: 30px; }

@@ -101,7 +101,7 @@ test('new states are independent, restorable and summarize an empty plan', () =>
 });
 
 test('every available ordinary course can be selected, rejects duplicate selection and can be dropped', () => {
-  for (const course of COURSES.filter((course) => course.id !== 'ml' && course.enrolled < course.capacity)) {
+  for (const course of COURSES.filter((course) => course.id !== 'ml' && !course.eligibleFrom && course.enrolled < course.capacity)) {
     const added = act(createState(), { type: 'ADD', id: course.id, at: 5 });
     assert.deepEqual(added.draft, [course.id]);
     assert.deepEqual(added.origins, { [course.id]: 'student' });
