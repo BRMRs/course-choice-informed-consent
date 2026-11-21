@@ -1,188 +1,315 @@
-import { initialState, reduce, restore } from './state.mjs';
+import { COURSES, getCourse, filterCourses, conflicts } from './catalog.mjs';
+import { createState, transition, restoreState, planSummary, REASONS, MIN_CREDITS, MAX_CREDITS } from './state.mjs';
 
-const KEY = 'mingli-course-choice-v1';
+const STORAGE_KEY = 'mingli-selection-workbench-v2';
+const SOURCE = 'https://github.com/BRMRs/course-choice-informed-consent';
 const app = document.querySelector('#app');
-const modal = document.querySelector('#modal');
-const source = 'https://github.com/BRMRs/course-choice-informed-consent';
-const escape = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let state = initialState();
-let storageWarning = '';
-let recovery = '';
-try {
-  const raw = localStorage.getItem(KEY);
-  if (raw) { state = restore(JSON.parse(raw)); recovery = '已恢复上次办理进度。已完成的步骤无需重做。'; }
-} catch { storageWarning = '上次保存的进度无法恢复。已开启新的体验，你可以从头办理。'; }
-
-const paths = {
-  book:'M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H4z M20 4h-5a3 3 0 0 0-3 3v14a4 4 0 0 1 4-2h4z',
-  grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
-  list:'M8 5h13M8 12h13M8 19h13M3 5h.01M3 12h.01M3 19h.01',
-  shield:'M12 3 3 7v6c0 5 9 9 9 9s9-4 9-9V7z M8 12l3 3 5-6',
-  search:'m21 21-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
-  check:'m5 12 4 4L19 6',
-  info:'M12 11v6M12 7h.01M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
-  lock:'M6 10h12v11H6z M8 10V7a4 4 0 0 1 8 0v3',
-  time:'M12 8v5l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
+const dialog = document.querySelector('#modal');
+const dayNames = ['', '周一', '周二', '周三', '周四', '周五'];
+const periods = { 1: '08:00—09:40', 3: '10:00—11:40', 5: '14:00—15:40', 7: '16:00—17:40', 9: '18:30—20:10' };
+const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const dateText = at => new Date(at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+const timeText = c => `${dayNames[c.day]} ${c.start}—${c.start + c.duration - 1}节`;
+let state = createState();
+let storageError = '';
+let dialogKind = null;
+let cancelHold = () => {};
+let storageSequence = 0;
+let suppressDialogClose = false;
+const useSharedStorage = Boolean(navigator.locks?.request);
+const recordStorage = {
+  getItem: key => (useSharedStorage ? localStorage : sessionStorage).getItem(key),
+  setItem: (key, value) => (useSharedStorage ? localStorage : sessionStorage).setItem(key, value),
 };
-function icon(name, size=20) { return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name] || paths.book}"/></svg>`; }
-function button(label, action, style='', extra='') { return `<button class="button ${style}" data-action="${action}" ${extra}>${label}</button>`; }
-function textButton(label, action, extra='') { return `<button class="text-button" data-action="${action}" ${extra}>${label}</button>`; }
-function syncReceipt() {
+let actionQueue = Promise.resolve();
+let returnFocus = null;
+
+function readSaved() {
+  const saved = recordStorage.getItem(STORAGE_KEY);
+  if (!saved) return null;
+  const envelope = JSON.parse(saved);
+  if (!Number.isSafeInteger(envelope.sequence) || envelope.sequence < 0) throw new TypeError('Invalid storage sequence');
+  return { sequence: envelope.sequence, state: restoreState(envelope.state) };
+}
+try {
+  const saved = readSaved();
+  if (saved) { state = saved.state; storageSequence = saved.sequence; }
+} catch { storageError = '本地记录暂时无法读取，本次可继续办理。'; }
+
+function refreshSaved() {
   try {
-    const saved = localStorage.getItem(KEY);
-    if (!saved) return false;
-    const latest = restore(JSON.parse(saved));
-    if (latest.receipt && latest.receipt.id !== state.receipt?.id) {
-      state = latest; recovery = '另一标签页已完成提交，已同步最终回执。'; return true;
-    }
-  } catch { /* A recoverable storage failure must not block this session. */ }
-  return false;
+    const saved = readSaved();
+    if (saved && saved.sequence > storageSequence) { state = saved.state; storageSequence = saved.sequence; }
+  } catch { /* Keep the current valid session available. */ }
 }
-function persist(forceReset=false) { try { if (!forceReset && syncReceipt()) render(); localStorage.setItem(KEY, JSON.stringify(state)); } catch { storageWarning = '本次可以继续办理，但浏览器未能保存进度，刷新可能丢失当前进度。'; } }
-function dispatch(action) {
-  syncReceipt();
-  const before = state.view;
-  state = reduce(state, action);
-  recovery = '';
-  persist(); render();
-  if (state.view !== before) { window.scrollTo(0, 0); document.querySelector('h1')?.focus({preventScroll:true}); }
+function save() {
+  try {
+    storageSequence++;
+    recordStorage.setItem(STORAGE_KEY, JSON.stringify({ sequence: storageSequence, state }));
+    storageError = '';
+  } catch { storageError = '浏览器未能保存进度，请保持当前页面打开。'; }
 }
+function act(action) {
+  const requested = { ...action, at: Date.now() };
+  if (action.type === 'SUBMIT') requested.expectedCourses = [...(state.review || [])];
+  const execute = () => {
+    refreshSaved();
+    state = transition(state, requested);
+    save(); render();
+  };
+  actionQueue = actionQueue.then(() => useSharedStorage
+    ? navigator.locks.request(STORAGE_KEY, { mode: 'exclusive' }, execute)
+    : execute()).catch(() => {
+      storageError = '操作暂未完成，请重试当前步骤。'; render();
+    });
+  return actionQueue;
+}
+function route() {
+  const [path, query = ''] = location.hash.slice(1).split('?');
+  const params = new URLSearchParams(query);
+  return { page: ['courses', 'timetable', 'results'].includes(path?.replace(/^\//, '')) ? path.replace(/^\//, '') : 'courses', params };
+}
+function navigate(page, params = new URLSearchParams()) {
+  const value = `#/${page}${params.size ? '?' + params.toString() : ''}`;
+  if (location.hash === value) render();
+  else location.hash = value;
+}
+function filters() {
+  const { params } = route();
+  return { query: params.get('q') || '', department: params.get('department') || 'all', category: params.get('category') || 'all', availableOnly: params.get('available') === '1', sort: params.get('sort') || 'fit' };
+}
+const iconPaths = {
+  school: 'M3 9l9-6 9 6M5 10v10h14V10M9 20v-6h6v6M9 9h6',
+  courses: 'M4 4h16v16H4zM4 9h16M9 9v11',
+  calendar: 'M4 5h16v16H4zM8 3v4M16 3v4M4 10h16M8 14h2M14 14h2M8 17h2',
+  receipt: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6',
+  search: 'M18 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0m-2 5 5 5',
+  check: 'm5 12 4 4L19 6',
+  chevron: 'm9 5 7 7-7 7',
+  info: 'M12 11v6M12 7h.01M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
+  clock: 'M12 7v5l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
+  close: 'm6 6 12 12M18 6 6 18',
+  inbox: 'M4 4h16v16H4zM4 13h5l1 3h4l1-3h5',
+};
+function icon(name, size = 18) { return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${iconPaths[name] || iconPaths.info}"/></svg>`; }
+function button(label, action, style = '', attributes = '') { return `<button type="button" class="button ${style}" data-action="${action}" ${attributes}>${label}</button>`; }
+function linkButton(label, action, attributes = '') { return `<button type="button" class="link-button" data-action="${action}" ${attributes}>${label}</button>`; }
 
 function shell(content) {
-  const cartView = ['cart','remove','confirm','success'].includes(state.view);
-  const steps = [['确认选课意向',state.query],['办理知情拒绝',state.rejected],['核对个人课表',state.backupRemoved],['获取选课回执',state.receipt]];
+  const { page } = route();
+  const summary = planSummary(state);
+  const titles = { courses: '选课工作台', timetable: '每周课表', results: '选课结果' };
   return `<header class="topbar">
-    <a class="brand" href="#" data-action="home"><span class="seal">${icon('book',27)}</span><span><strong>明理大学</strong><small>MINGLI UNIVERSITY</small></span></a>
-    <div class="top-title">本科生选课服务平台</div>
-    <div class="top-meta"><span class="semester">2026—2027 · 秋季学期</span><span class="avatar">同</span><span class="muted">体验同学</span></div>
+    <a href="#/courses" class="brand"><span class="brand-mark">${icon('school', 27)}</span><span class="university">明理大学</span><span class="system-name">本科教务系统</span></a>
+    <div class="top-actions"><span class="current-term">2026—2027 学年 · 第一学期</span>${button(icon('info') + '<span>系统信息</span>', 'about', 'quiet', 'aria-label="系统信息"')}<span class="avatar">李</span><span class="student-name">李予安</span></div>
   </header>
-  <div class="layout"><aside class="sidebar"><div><p class="nav-label">教务服务 / ACADEMICS</p><nav aria-label="主导航">
-    <button class="nav-item ${!cartView?'active':''}" data-action="home">${icon('grid')}选课中心</button>
-    <button class="nav-item ${cartView?'active':''}" data-action="cart">${icon('list')}我的课表 <span class="count">${state.cart.length}</span></button>
-  </nav></div><section class="side-task"><h3>本次办理进度</h3>${steps.map(([name,done],i)=>`<div class="task-row ${done?'done':''}"><span class="step-dot">${done?'✓':i+1}</span>${name}</div>`).join('')}</section>
-  <div class="sidebar-note"><strong>你的选择，我们认真对待。</strong>所以，请你也认真对待<br>我们为你做出的选择。<br><br>${textButton('重新体验','reset')}</div></aside>
-  <main id="content" class="main"><div class="breadcrumb"><span>教务服务 &nbsp; / &nbsp; 选课中心</span><span>开放办理中 · 交互演示</span></div>
-  ${storageWarning?`<div class="notice storage-warning" role="status">${escape(storageWarning)}</div>`:''}
-  ${recovery?`<div class="notice" role="status">${recovery}</div>`:''}
-  ${state.notice?`<div class="notice" role="status">${escape(state.notice)}</div>`:''}
-  ${content}<footer class="footer"><span>明理大学教务服务中心 · 虚构校园，真实的选择困境</span><span><a href="${source}" target="_blank" rel="noopener">源代码仓库</a> &nbsp; · &nbsp; ${textButton('重新体验','reset')}</span></footer></main></div>`;
+  <div class="workspace"><aside class="sidebar"><div class="nav-caption">教学服务</div><nav aria-label="教学服务">${[['courses', '课程查询', 'courses'], ['timetable', '每周课表', 'calendar'], ['results', '选课结果', 'receipt']].map(([id, name, symbol]) => `<a href="#/${id}" class="nav-link ${page === id ? 'active' : ''}" ${page === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${name}</span>${page === id ? '<i></i>' : ''}</a>`).join('')}</nav>
+    <section class="round-note"><span class="round-label">当前选课轮次</span><strong>第一轮 · 正选</strong><span class="round-open">${icon('clock', 14)} 选课开放中</span></section><div class="sidebar-footer">本科生院 · 教务服务中心<br><span>选课服务 / v2.0</span></div></aside>
+  <main id="content"><div class="breadcrumb">教学服务 ${icon('chevron', 12)} ${titles[page]}</div>
+    <div class="page-heading"><div><h1 tabindex="-1">${titles[page]}</h1><p>${page === 'courses' ? '2026—2027 学年第一学期本科生第一轮选课' : page === 'timetable' ? '第一学期 · 第 1—16 教学周' : '查看已提交方案及办理记录'}</p></div><span class="status ${state.editing ? 'neutral' : 'success'}">${state.editing ? '方案待提交' : '本轮已提交'}</span></div>
+    <section class="student-strip" aria-label="学生与选课信息"><div class="student-identity"><span class="student-icon">李</span><div><strong>李予安 <span>20240301026</span></strong><small>计算机学院 · 计算机科学与技术 · 2024 级</small></div></div><div class="student-stat"><span>本轮学分要求</span><strong>${MIN_CREDITS}—${MAX_CREDITS} <small>学分</small></strong></div><div class="student-stat"><span>当前方案</span><strong>${summary.credits} <small>学分 / ${summary.count} 门</small></strong></div></section>
+    ${storageError ? `<div class="alert warning" role="status">${icon('info')}<span>${escape(storageError)}</span></div>` : ''}
+    ${state.notice && !state.pending && page === 'courses' ? `<div class="alert ${/冲突|满|最多|需|未找到|请先/.test(state.notice) ? 'warning' : 'info'}" role="status">${icon('info')}<span>${escape(state.notice)}</span>${linkButton('关闭', 'dismiss')}</div>` : ''}
+    ${content}
+    <footer class="page-footer"><span>明理大学本科生院</span><span>${storageError ? '本地保存异常' : '本地记录已保存'} · 所有时间均为北京时间</span></footer>
+  </main></div>${page === 'courses' ? `<div class="mobile-plan-bar"><div><strong>${summary.credits} 学分</strong><span>${summary.count} 门${state.editing ? '待提交' : '已提交'}</span></div>${state.editing ? `${linkButton('查看方案', 'view-plan')}${button('核对并提交', 'review', 'primary', !summary.valid ? 'disabled' : '')}` : button('查看提交结果', 'goto-results', 'primary')}</div>` : ''}`;
 }
-function searchForm() {
-  return `<form class="search" id="search-form" role="search">${icon('search')}<label class="sr-only" for="course-search">搜索课程</label><input id="course-search" name="query" type="search" placeholder="输入你想学习的课程" value="${escape(state.query)}" autocomplete="off" required><button class="button" type="submit">搜索课程</button></form>`;
+
+function courseAction(course) {
+  const selected = state.draft.includes(course.id);
+  if (!state.editing) return selected ? '<span class="row-state">已提交</span>' : '<span class="muted">—</span>';
+  if (selected) return linkButton('退选', 'drop', `data-course="${course.id}" aria-label="退选${course.name}"`);
+  if (course.enrolled >= course.capacity) return '<span class="status muted-status">已满</span>';
+  const conflicting = state.draft.find(id => conflicts(course, getCourse(id)));
+  if (conflicting) return button('时间冲突', 'add', 'row-button conflict-button', `data-course="${course.id}" aria-label="查看${course.name}时间冲突"`);
+  return button('选课', 'add', 'row-button', `data-course="${course.id}" aria-label="选课${course.name}"`);
 }
-function home() {
-  return `<div class="eyebrow">Informed choice, better future</div><section class="hero"><div class="hero-copy"><span class="tag">2026 秋季 · 课程意向办理</span><h1 tabindex="-1">每一次选择，<br>都值得<em>再考虑。</em></h1><p>你有自由选择的权利。我们有责任确保，<br>你已充分了解所有值得选择的可能。</p><span class="tiny">你确定不学吗？ &nbsp; 校园课程充分知情选择系统</span></div><div class="hero-art" aria-hidden="true"><div class="mini-doc"><small>OFFICE OF ACADEMIC AFFAIRS</small><h3>充分知情<br>自主选择</h3><div class="doc-line"></div><div class="doc-line" style="width:75%"></div><div class="doc-stamp">你的成长 · 我们的责任</div></div><span class="art-label">YOUR CHOICE, OUR CONSIDERATION.</span></div></section>
-  <div class="task-banner">${icon('info')}<div><p><strong>本次任务：只选《机器学习》，获取选课回执。</strong></p><small>这是本轮唯一选课入口。选一门即可满足提交条件，所有信息均为演示数据。</small></div></div>
-  <section><div class="section-head"><h2>从你的兴趣开始</h2><span>当然，也不止于你的兴趣</span></div>${searchForm()}<p class="search-hint">试试搜索 ${textButton('机器学习','quick-search')} <span>· 系统将综合考虑，为你呈现更适配的课程。</span></p></section>
-  <div class="home-bottom"><section class="panel notice-panel"><span class="notice-icon">${icon('shield',24)}</span><div><h3>理性选课温馨提示</h3><p>兴趣是起点，不是边界。拒绝一门课程之前，<br>请先给予它一次被你充分了解的机会。</p></div></section><section class="panel"><div class="score-mini"><div><h3>培养方案完整度</h3><p>你的兴趣之外，还有成长空间。</p></div><span class="score-number">78<small>%</small></span></div><div class="bar"><i></i></div><span class="tiny">建议保留一项跨学科成长机会</span></section></div>`;
+function courseTable(courses, mode = 'catalog') {
+  return `<div class="course-table-wrap"><table class="course-table ${mode === 'submitted' ? 'submitted-table' : ''}"><caption class="sr-only">${mode === 'catalog' ? '开课教学班列表' : '方案课程明细'}</caption><thead><tr><th scope="col">课程 / 教学班</th><th scope="col">学分</th><th scope="col">教师</th><th scope="col">上课安排</th><th scope="col">${mode === 'catalog' ? '已选 / 容量' : '课程类别'}</th>${mode === 'catalog' ? '<th scope="col" class="action-cell">操作</th>' : ''}</tr></thead><tbody>${courses.map(c => `<tr class="${state.draft.includes(c.id) && mode === 'catalog' ? 'selected-row' : ''}"><td data-label="课程"><button class="course-title" data-action="detail" data-course="${c.id}">${c.name}</button><div class="course-secondary"><span>${c.code} · 01班</span>${mode === 'catalog' ? `<span class="fit-value ${c.fit >= 90 ? 'recommended' : ''}">${c.fit >= 90 ? '推荐 ' : '适配 '}${c.fit}%</span>` : ''}</div></td><td data-label="学分" class="credit-cell">${c.credits}</td><td data-label="教师">${c.teacher}</td><td data-label="上课安排"><span>${timeText(c)}</span><small>${c.room} · ${c.weeks}</small></td><td data-label="${mode === 'catalog' ? '容量' : '类别'}">${mode === 'catalog' ? `<span class="capacity ${c.enrolled >= c.capacity ? 'full' : ''}">${c.enrolled}<em> / ${c.capacity}</em></span>` : c.category}</td>${mode === 'catalog' ? `<td class="action-cell">${courseAction(c)}</td>` : ''}</tr>`).join('')}</tbody></table></div>`;
 }
-const courses = [
-  {id:'agri',title:'农业数据采集基础',score:98,reason:'为你尚未被充分利用的星期五晚上，安排一点成长。',code:'AGRI 102',tag:'重点适配推荐'},
-  {id:'stats',title:'教育统计软件实践',score:94,reason:'本课程尚有充足容量，有效保障你的学习机会。',code:'EDUC 206',tag:'容量充足'},
-  {id:'expert',title:'专家系统发展史',score:91,reason:'补全知识版图，让你的人工智能学习不留空白。',code:'COMP 118',tag:'拓展知识边界'},
-  {id:'ml',title:'机器学习',score:67,reason:'与你的搜索完全匹配，但兴趣并非适配的全部。',code:'COMP 301',tag:'关键词完全匹配'},
-];
-function results() {
-  const matched = /机器学习|machine\s*learning/i.test(state.query);
-  return `<div class="eyebrow">Course discovery</div><h1 tabindex="-1">我们为你找到了${matched?'四种可能':'更多可能'}。</h1><p class="subtitle">你的搜索是一个开始。更全面的选择，值得排在前面。</p>${searchForm()}
-  ${matched?`<div class="rule-box"><strong>已按综合适配度优化排序，而非仅按关键词匹配。</strong><details><summary>综合适配度究竟考虑了什么？</summary><div class="weights">${[['50%','课程容量优化'],['25%','空闲时段利用'],['15%','课程分布均衡'],['10%','个人兴趣']].map(([n,l])=>`<div class="weight"><strong>${n}</strong><small>${l}</small></div>`).join('')}</div><p class="tiny" style="margin-top:10px;margin-bottom:0">演示规则权重；以下适配度为固定演示值。个人兴趣当然被考虑了，足足占 10%。</p></details></div><div class="section-head"><h2>“${escape(state.query)}”的搜索结果</h2><span>共 4 门课程</span></div><div class="courses">${courses.map((c,i)=>`<article class="course ${c.id==='ml'?'target':''}"><div class="course-top"><span class="course-num">${String(i+1).padStart(2,'0')} / ${c.code}</span><span class="tag ${c.id==='ml'?'match':''}">${c.tag}</span></div><h3>${c.title}</h3><p>${c.reason}</p><div class="course-foot"><span><strong>${c.score}%</strong>综合适配度</span><button data-action="${c.id==='ml'?'target':'course-info'}" data-course="${c.id}">查看课程</button></div></article>`).join('')}</div>`:`<div class="panel empty"><h2>还没有这门课的演示数据</h2><p>本次体验的目标课程是《机器学习》。修改搜索词即可继续，已完成进度不会丢失。</p>${button('搜索机器学习','quick-search')}</div>`}`;
+
+function selectionPanel() {
+  const s = planSummary(state);
+  return `<aside class="selection-panel" aria-label="当前选课方案"><div class="panel-title"><h2>${state.editing ? '待提交方案' : '已提交方案'}</h2><span>${s.count} 门</span></div><div class="plan-credits"><strong>${s.credits}<span> / ${MAX_CREDITS}</span></strong><span>学分</span></div><div class="credit-track"><i style="width:${s.credits / MAX_CREDITS * 100}%"></i><b style="left:${MIN_CREDITS / MAX_CREDITS * 100}%"></b></div><div class="credit-labels"><span>最低 ${MIN_CREDITS} 学分</span><span>上限 ${MAX_CREDITS} 学分</span></div>
+    <div class="selected-list">${state.draft.length ? state.draft.map(id => { const c = getCourse(id); return `<div class="selected-item"><div class="selected-item-head"><button class="course-title" data-action="detail" data-course="${id}">${c.name}</button>${state.editing ? linkButton('退选', 'drop', `data-course="${id}" aria-label="退选方案中的${c.name}"`) : icon('check', 15)}</div><div class="selected-item-meta">${c.credits} 学分 · ${timeText(c)}</div>${state.origins[id] === 'guarantee' ? '<span class="status warning">保障席位</span>' : ''}</div>`; }).join('') : `<div class="empty-selection">${icon('inbox', 30)}<span>暂无待提交课程</span></div>`}</div>
+    <div class="plan-bottom"><div class="plan-condition ${s.valid ? 'met' : ''}">${icon(s.valid ? 'check' : 'info', 15)} ${s.valid ? '符合本轮学分要求' : `还需选择 ${Math.max(0, MIN_CREDITS - s.credits)} 学分`}</div>${state.editing ? button('核对并提交', 'review', 'primary full-width', !s.valid ? 'disabled' : '') : button('查看提交结果', 'goto-results', 'primary full-width')}<a class="timetable-link" href="#/timetable">查看每周课表</a></div></aside>`;
 }
-function detail() {
-  return `${textButton('返回搜索结果','results')}<div class="two-col"><section class="panel"><div class="course-cover" aria-hidden="true"><span>Machine<br>Learning</span></div><span class="tag match">关键词完全匹配</span><h1 tabindex="-1">机器学习</h1><p class="subtitle">让计算机从数据中学习，而不是从建议中妥协。</p><div class="info-line"><span>COMP 301</span><span>3 学分</span><span>周三 14:00—16:00</span></div><h3>课程介绍</h3><p class="body-copy" style="margin-top:12px">从监督学习到模型评估，理解算法如何从数据中发现规律。通过实际案例，建立机器学习的基础知识与应用能力。</p><div class="reading"><p>本轮选课只选此门即可满足提交要求。你不需要额外课程才能完成本轮任务。</p></div></section><aside class="aside-card"><div class="eyebrow">Personal fit</div><div class="score-number" style="color:#d9eda9;margin-top:13px">67<small>%</small></div><h3>${state.rejected?'你的坚持，已被记录。':'先了解，再选择。'}</h3><p>${state.rejected?'你已充分了解重点推荐课程，并完成知情拒绝。现在可以加入你的目标课程。':'为保障充分知情，请先了解并办理一门重点推荐课程的拒绝手续。完成后，即可加入本课程。'}</p><div class="bar"><i style="width:${state.rejected?100:0}%"></i></div><span class="tiny">知情拒绝进度：${state.rejected?'1 / 1 已完成':'0 / 1 待办理'}</span>${state.rejected?button(state.added?'查看我的课表':'加入《机器学习》',state.added?'cart':'add','lime'):button('办理知情拒绝','consent','lime')}<p class="tiny">${icon(state.rejected?'check':'lock',14)} ${state.rejected?'已解锁，可自由选择':'加入课程暂未解锁 · 原因如上'}</p></aside></div>`;
+
+function coursesPage() {
+  const f = filters(), list = filterCourses(f);
+  const departments = [...new Set(COURSES.map(c => c.department))];
+  return `${!state.editing ? `<div class="submitted-banner"><span>${icon('check')} 本轮方案已提交，课程列表可继续查询。</span>${button('调整选课', 'edit', 'secondary')}</div>` : ''}<div class="work-grid"><section class="catalog-panel"><div class="section-title"><h2>开课查询</h2><span>第一轮可选教学班</span></div>
+    <form id="filter-form" class="filters"><div class="search-row"><label class="search-field">${icon('search')}<span class="sr-only">课程名称、课程号或教师</span><input type="search" name="q" placeholder="课程名称 / 课程号 / 任课教师" value="${escape(f.query)}" autocomplete="off"></label><button class="button primary" type="submit">查询</button>${linkButton('重置', 'reset-filters')}</div><div class="filter-row"><label>开课学院<select name="department"><option value="all">全部学院</option>${departments.map(d => `<option ${f.department === d ? 'selected' : ''}>${d}</option>`).join('')}</select></label><label>课程类别<select name="category"><option value="all">全部类别</option>${['专业选修', '公共选修', '通识选修'].map(c => `<option ${f.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label><label class="check-filter"><input type="checkbox" name="available" ${f.availableOnly ? 'checked' : ''}>仅显示有余位</label></div></form>
+    <div class="table-toolbar"><span>共 <strong>${list.length}</strong> 个教学班${f.query ? ` · “${escape(f.query)}”` : ''}</span><label>排序<select id="sort-select" aria-label="课程排序"><option value="fit" ${f.sort === 'fit' ? 'selected' : ''}>综合适配优先</option><option value="code" ${f.sort === 'code' ? 'selected' : ''}>课程号顺序</option><option value="credits" ${f.sort === 'credits' ? 'selected' : ''}>学分从高到低</option></select></label></div>
+    ${list.length ? courseTable(list) : `<div class="empty-state">${icon('search', 30)}<h3>没有符合条件的教学班</h3><p>请修改查询条件。</p>${button('清除筛选条件', 'reset-filters', 'secondary')}</div>`}<div class="table-footer"><span>已显示全部 ${list.length} 个教学班</span><span>每个教学班独立占用选课名额</span></div></section>${selectionPanel()}</div>`;
 }
-function consent() {
-  const stage = !state.read?0:!state.reason?1:!state.quizPassed?2:3;
-  const labels = ['了解课程','表达理由','理解测验','确认拒绝'];
-  let body = '';
-  if (stage===0) body=`<span class="tag">你将拒绝的重点推荐课程</span><h2 style="margin-top:15px">农业数据采集基础</h2><p class="body-copy">在作出决定之前，请了解以下课程事实。</p><div class="reading"><p><strong>学什么：</strong>采集土壤湿度、温度等农业环境数据。</p><p><strong>怎么学：</strong>认识基础传感器，记录并整理采集结果。</p><p><strong>何时学：</strong>星期五 18:00—20:00，3 学分。</p></div><p class="tiny">你已经可以看到全部介绍。无需计时等待，确认了解后即可继续。</p>${button('我已了解，继续拒绝','read')}`;
-  if (stage===1) body=`<h2>请说明你的拒绝理由</h2><p class="body-copy">每个决定都值得被认真记录。请选择最接近你真实想法的一项。</p><form id="reason-form">${['我不感兴趣','我只想选机器学习','星期五晚上有其他安排'].map((r,i)=>`<label class="option"><input type="radio" name="reason" value="${r}" required><span>${r}</span></label>`).join('')}<div class="action-row"><button class="button" type="submit">记录理由并继续</button></div></form>`;
-  if (stage===2) body=`<h2>拒绝之前，请证明你了解</h2><p class="tiny">你的原始理由：${escape(state.reason)}（已保存）</p><blockquote class="quote"><small>教务系统的进一步考虑</small>尚未建立兴趣，不代表课程不适合你。请先证明，你理解将要放弃的成长机会。</blockquote><form id="quiz-form"><h3 style="margin:22px 0 12px">农业数据采集主要获得哪类信息？</h3>${[['bus','校车班次'],['environment','土壤湿度、温度等环境数据'],['door','宿舍门禁记录']].map(([v,l])=>`<label class="option"><input type="radio" name="answer" value="${v}" required><span>${l}</span></label>`).join('')}<div class="action-row"><button class="button" type="submit">提交理解测验</button></div></form><details class="rule-box"><summary>重新查看课程事实</summary><p style="margin:12px 0 0">本课程学习采集土壤湿度、温度等农业环境数据，认识基础传感器。</p></details>`;
-  if (stage===3) body=`<span class="checkmark">${icon('check',25)}</span><h2>你已具备拒绝本课程的条件</h2><p class="body-copy">你已阅读课程信息，表达拒绝理由，并通过理解测验。我们确认，这不是一次未经思考的拒绝。</p><div class="reading"><p>原始理由：${escape(state.reason)}</p><p>待拒绝课程：农业数据采集基础</p><p>下一步：解锁并加入《机器学习》</p></div>${button('是的，我仍然不选这门课','reject')}`;
-  return `<div class="eyebrow">Informed refusal procedure</div><h1 tabindex="-1">你确定不学吗？</h1><p class="subtitle">当然可以拒绝。只是，请先完成拒绝所需的充分了解。</p><div class="progress-steps">${labels.map((l,i)=>`<div class="progress-step ${i<=stage?'active':''}">${i<stage?'✓':i+1} &nbsp;${l}</div>`).join('')}</div><div class="two-col"><section class="panel">${body}</section><aside class="panel"><span class="tag">办理须知</span><h3 style="margin-top:16px">你的选择权始终受到尊重</h3><p class="body-copy" style="margin-top:14px">本流程仅为帮助你作出理性决定。完成这四个步骤后，你可以继续坚持最初的选择。</p><p class="tiny">已完成步骤会保存。答错可以重试，不会要求重新阅读。</p>${textButton('暂时返回目标课程','target')}</aside></div>`;
+
+function timetablePage() {
+  const { params } = route();
+  const useSubmitted = params.get('mode') === 'submitted' || (!state.editing && params.get('mode') !== 'draft');
+  const ids = useSubmitted ? state.submitted?.courses || [] : state.draft;
+  return `<section class="surface"><div class="section-title"><div><h2>每周课程安排</h2><span>${ids.length} 门课程 · 第 1—16 周</span></div><div class="segmented"><a href="#/timetable?mode=draft" class="${!useSubmitted ? 'active' : ''}">待提交方案</a><a href="#/timetable?mode=submitted" class="${useSubmitted ? 'active' : ''}">已提交方案</a></div></div><div class="schedule-wrap"><table class="schedule"><caption class="sr-only">${useSubmitted ? '已提交' : '待提交'}方案每周课表</caption><thead><tr><th scope="col">节次 / 时间</th>${dayNames.slice(1).map(d => `<th scope="col">${d}</th>`).join('')}</tr></thead><tbody>${[1, 3, 5, 7, 9].map(start => `<tr><th scope="row"><strong>${start}—${start + 1} 节</strong><small>${periods[start]}</small></th>${[1, 2, 3, 4, 5].map(day => { const c = ids.map(getCourse).find(c => c.day === day && c.start === start); return `<td>${c ? `<button class="schedule-course ${!useSubmitted && state.origins[c.id] === 'guarantee' ? 'guarantee-course' : ''}" data-action="detail" data-course="${c.id}"><strong>${c.name}</strong><span>${c.teacher} · ${c.room}</span><small>${c.weeks}</small></button>` : '<span class="schedule-empty">—</span>'}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div><div class="table-footer"><span>${useSubmitted ? '按最近一次提交结果显示' : '按当前待提交方案显示，提交前可继续调整'}</span><a href="#/courses">返回课程查询</a></div></section>`;
 }
-function cart() {
-  if (!state.added) return `<div class="eyebrow">Your course plan</div><h1 tabindex="-1">我的课表</h1><div class="panel empty"><h2>你的课表还是空的</h2><p>本次任务是仅选择《机器学习》。从搜索开始，或继续上次的办理。</p>${button(state.query?'继续办理':'开始选课',state.query?'target':'quick-search')}</div>`;
-  const backup = state.cart.includes('agri');
-  return `<div class="eyebrow">Your course plan</div><h1 tabindex="-1">你的选择，已为你妥善安排。</h1><p class="subtitle">请核对待提交课程。只有最终提交后，才会生成选课回执。</p>
-  ${backup?`<div class="task-banner">${icon('shield')}<div><p><strong>额外为你保留了一门保障课程。</strong></p><small>已记录你的拒绝。为避免未来后悔，我们仍为你保留一个保障席位。此课程尚未提交。</small></div></div>`:''}
-  <div class="two-col"><section class="panel"><div class="section-head" style="margin-top:0"><h2>待提交课程</h2><span>${state.cart.length} 门 · ${state.cart.length*3} 学分</span></div><div class="cart-course"><div><span class="cart-code">COMP 301 · 个人选择</span><h3>机器学习</h3><p>周三 14:00—16:00</p></div><div class="cart-meta"><strong>3</strong>学分</div></div>${backup?`<div class="cart-course"><div><span class="tag amber">系统保障课 · 尚未提交</span><h3>农业数据采集基础</h3><p>你已知情拒绝此课程，原始记录仍然有效。</p></div><div class="cart-meta"><strong>3</strong>学分<br>${textButton('放弃保障席位','remove')}</div></div><p class="small-note">这门课不是你选的，但系统认为你可能会需要。</p>`:`<div class="notice">${icon('check',17)} 已放弃农业数据采集保障席位。该课程不会再次自动加入。</div>`}</section>
-  <aside><div class="panel"><span class="tag match">本轮提交条件：已满足</span><h3 style="margin-top:17px">一门课，就已足够。</h3><p class="body-copy" style="margin-top:10px">《机器学习》满足本轮演示选课要求，无需额外选课。</p></div><div class="completeness"><div class="complete-head"><h3>培养完整度</h3><strong>${backup?'100':'78'}%</strong></div><div class="bar"><i style="width:${backup?'100':'78'}%"></i></div><p>${backup?'保留保障席位，成长方案更加完整。':'未保留跨学科保障建议 −22%。你的选课符合要求，我们仍建议你成为更完整的自己。'}</p>${button('返回查看成长建议','suggestions','secondary')}<div style="margin-top:15px">${backup?`<p class="tiny">要完成“只选机器学习”的任务，请先放弃保障席位。</p>`:textButton('按当前方案提交','review')}</div></div></aside></div>`;
+
+function resultsPage() {
+  const receipt = state.submitted;
+  if (!receipt) return `<section class="surface empty-state">${icon('receipt', 34)}<h2>尚无提交记录</h2><p>当前选课方案尚未提交。</p><a class="button primary" href="#/courses">返回选课工作台</a></section>`;
+  return `<section class="surface"><div class="result-header"><div class="result-title"><span class="result-check">${icon('check', 22)}</span><div><h2>选课方案已提交</h2><p>第 ${receipt.revision} 版 · ${receipt.courses.length} 门课程 · ${receipt.credits} 学分</p></div></div>${state.editing ? '<a class="button secondary" href="#/courses">继续调整方案</a>' : button('调整选课', 'edit', 'secondary')}</div><div class="receipt-meta"><div><span>选课轮次</span><strong>第一轮 · 正选</strong></div><div><span>提交编号</span><strong>${escape(receipt.id)}</strong></div><div><span>提交时间</span><strong>${dateText(receipt.at)}</strong></div></div>${courseTable(receipt.courses.map(getCourse), 'submitted')}<div class="table-footer"><span>以上课程已纳入本轮选课结果</span><a href="#/timetable?mode=submitted">查看已提交课表</a></div></section>
+    <details class="surface record-section"><summary>办理记录 <span>${state.events.length} 条</span></summary><ol class="activity-list">${state.events.slice().reverse().map(e => `<li><span>${escape(e.label)}</span><time>${dateText(e.at)}</time></li>`).join('')}</ol></details>
+    ${state.history.length ? `<details class="surface record-section"><summary>历史提交 <span>${state.history.length} 版</span></summary>${state.history.slice().reverse().map(r => `<div class="history-row"><div><strong>第 ${r.revision} 版</strong><small>${dateText(r.at)}</small></div><span>${r.courses.map(id => getCourse(id).name).join('、')}</span><span>${r.credits} 学分</span></div>`).join('')}</details>` : ''}`;
 }
-function remove() {
-  return `<div class="eyebrow">Learning opportunity protection</div><h1 tabindex="-1">放弃一份保障，需要你的确认。</h1><p class="subtitle">我们尊重你的决定，也有义务再次提醒你。</p><div class="two-col"><section class="panel"><span class="tag amber">待放弃的保障席位</span><h2 style="margin-top:15px">农业数据采集基础</h2><blockquote class="quote">你刚刚已经证明，你充分了解这门课程。现在，请再确认一次，你愿意放弃它。</blockquote><label class="option"><input type="checkbox" id="waiver" ${state.waiver?'checked':''}><span>我理解可以继续选择《机器学习》，仍选择放弃此保障席位。<small>放弃后不会自动加回，不影响本轮提交资格。</small></span></label><button id="hold-button" class="button hold" ${!state.waiver?'disabled':''} style="margin-top:16px"><i></i><span>长按 2 秒，确认放弃保障</span></button><p id="hold-status" class="tiny" role="status" style="margin-top:12px">支持鼠标、触控，或聚焦按钮后按住空格。中途松开可重新尝试。</p><div class="action-row">${textButton('返回课表，暂不放弃','cart')}</div></section><aside class="panel"><h3>已经拒绝，为什么还要再拒绝？</h3><p class="body-copy" style="margin-top:13px">知情拒绝是你的意愿记录。保障席位是我们为你做出的安排。两者并不矛盾。</p></aside></div>`;
+
+function courseDetails(id) {
+  const c = getCourse(id);
+  if (!c) return;
+  dialogKind = { type: 'detail', id };
+  setDialog(`<div class="dialog-heading"><div><span class="dialog-kicker">${c.code} · 01 教学班</span><h2 id="modal-title">${c.name}</h2></div>${closeButton()}</div><div class="detail-facts">${[['开课学院', c.department], ['课程类别', c.category], ['学分', `${c.credits} 学分`], ['任课教师', c.teacher], ['上课时间', `${timeText(c)} · ${periods[c.start]}`], ['上课地点', c.room], ['教学周次', c.weeks], ['已选 / 容量', `${c.enrolled} / ${c.capacity}`]].map(([l, v]) => `<div><span>${l}</span><strong>${v}</strong></div>`).join('')}</div><section class="detail-section"><h3>课程简介</h3><p>${c.description}</p></section><section class="detail-section"><h3>教学内容</h3><ol>${c.syllabus.map(t => `<li>${t}</li>`).join('')}</ol></section><section class="detail-section"><h3>考核方式</h3><p>${c.assessment}</p></section><div class="dialog-actions">${button('关闭', 'close-dialog', 'secondary')}${state.editing ? (state.draft.includes(id) ? button('退选该课程', 'drop', 'secondary', `data-course="${id}"`) : button('选入该课程', 'add', 'primary', `data-course="${id}" ${c.enrolled >= c.capacity ? 'disabled' : ''}`)) : ''}</div>`);
 }
-function confirm() {
-  return `<div class="eyebrow">Final confirmation</div><h1 tabindex="-1">最后，按你的选择提交。</h1><p class="subtitle">以下是最终提交内容。我们不会在提交后替你改变选择。</p><div class="panel" style="max-width:760px;margin-top:25px"><span class="tag match">本轮提交条件：已满足</span><div class="cart-course" style="margin-top:18px"><div><span class="cart-code">COMP 301</span><h2 style="margin:6px 0">机器学习</h2><p>周三 14:00—16:00</p></div><div class="cart-meta"><strong>3</strong>学分</div></div><div class="receipt-total"><span>将提交 1 门课程</span><strong>共 3 学分</strong></div><p class="body-copy">已放弃：农业数据采集基础保障席位。<br>培养完整度：78%。本方案符合本轮提交要求。</p><div class="action-row">${button('是的，提交我真正选择的课程','submit')}${textButton('返回核对课表','cart')}</div></div>`;
+function closeButton() { return `<button type="button" class="icon-button" data-action="close-dialog" aria-label="关闭对话框">${icon('close', 21)}</button>`; }
+function setDialog(html, className = '') {
+  const opening = !dialog.open;
+  const oldFocus = document.activeElement;
+  if (opening) returnFocus = oldFocus?.matches('[data-action]') ? { action: oldFocus.dataset.action, course: oldFocus.dataset.course } : null;
+  cancelHold();
+  dialog.className = className;
+  dialog.innerHTML = html;
+  if (!dialog.open) dialog.showModal();
+  setupHold();
+  if (!opening && dialog.contains(document.activeElement) === false) {
+    const heading = dialog.querySelector('#modal-title');
+    heading?.setAttribute('tabindex', '-1'); heading?.focus({ preventScroll: true });
+  }
 }
-function success() {
-  const receipt = state.receipt;
-  const actionCount = state.events.length;
-  const searches = state.events.filter(e=>e.type==='SEARCH').length;
-  const quizAttempts = state.attempts;
-  const seconds = Math.floor(state.activeMs/1000);
-  const stamp = receipt?.time ? new Date(receipt.time).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}) : '';
-  return `<section class="receipt"><div class="receipt-head"><span class="checkmark">${icon('check',27)}</span><div class="eyebrow" style="justify-content:center">Your choice, finally.</div><h1 tabindex="-1">选课成功。这次，听你的。</h1><p>你最终选择的，仍然是最初想选的那一门。</p></div><div class="receipt-sheet"><div class="receipt-school"><div><strong>明理大学 · 选课回执</strong><div class="tiny">2026—2027 秋季学期</div></div><div class="receipt-id">编号 ${escape(receipt?.id)}<br>${escape(stamp)}（北京时间）</div></div><div class="cart-course"><div><span class="cart-code">COMP 301</span><h2 style="margin:8px 0">机器学习</h2><p>周三 14:00—16:00 · 个人选择</p></div><div class="cart-meta"><strong>3</strong>学分</div></div><div class="receipt-total"><span>已提交课程</span><strong>仅 1 门 · 共 3 学分</strong></div><div class="receipt-final">农业数据采集基础未被提交。你的最终选择已保存。</div><p class="tiny" style="margin:17px 0 0">本次演示选课成功。此回执仅为交互演示，不接入真实教务系统。</p></div>
-  <details class="panel ledger" id="ledger"><summary>你的选择权账单</summary><p class="ledger-intro">系统每一步都正确执行。只有你的意图，被反复重新考虑。</p><div class="ledger-stats"><div><strong>${actionCount}</strong><span>次业务操作尝试</span></div><div><strong>${quizAttempts}</strong><span>次理解测验</span></div><div><strong>${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}</strong><span>活跃体验时长</span></div></div><div class="reading"><p>原始目标：只选《机器学习》。</p><p>原始拒绝理由：${escape(state.reason)}。</p><p>最终结果：只选《机器学习》。中间的手续，由你承担。</p></div>
-  ${[
-    ['01','你的兴趣，只占 10%','你想精准搜索，系统却优先替学校分配空位。','搜索重排 '+searches+' 次'],
-    ['02','为了不上课，你先学了一课','你想拒绝，系统要求你先证明自己有资格拒绝。','测验尝试 '+quizAttempts+' 次 · 知情拒绝 '+(state.rejected?1:0)+' 次'],
-    ['03','拒绝被记录，却没被尊重','你刚拒绝的课，以“保障权益”为由被重新加入。','保障课移除 '+(state.backupRemoved?1:0)+' 次'],
-    ['04','合规了，仍然不够完整','你已经满足要求，系统仍用分数让你怀疑自己的选择。','最终提交确认 '+state.events.filter(e=>e.type==='SUBMIT').length+' 次'],
-  ].map(([n,title,description,metric])=>`<section class="ledger-item"><h3><span class="tag">${n}</span>${title}</h3><p>${description}</p><p class="tiny">${metric}</p></section>`).join('')}<p class="tiny">基于本次实际业务操作记录；不统计输入字符、滚动或长按动画帧。时长仅累加页面可见期间的时间。</p></details><div class="center action-row" style="justify-content:center">${button('重新体验','reset','secondary')}<a class="button" href="${source}" target="_blank" rel="noopener">查看源代码</a></div></section>`;
+function closeDialog() {
+  cancelHold(); dialogKind = null;
+  suppressDialogClose = true; dialog.close(); suppressDialogClose = false;
+  if (returnFocus) {
+    const candidates = [...document.querySelectorAll(`[data-action="${returnFocus.action}"]`)];
+    const target = candidates.find(node => node.dataset.course === returnFocus.course);
+    (target || document.querySelector('h1'))?.focus({ preventScroll: true });
+    returnFocus = null;
+  }
 }
-function showDialog(title, body, actions='') {
-  modal.innerHTML=`<button class="dialog-close" data-action="close-modal" aria-label="关闭">×</button><h2 id="modal-title">${title}</h2>${body}<div class="action-row">${actions || button('我已了解','close-modal')}</div>`;
-  modal.showModal();
+function procedureDialog() {
+  dialogKind = { type: 'procedure' };
+  if (state.pending === 'consent') {
+    const c = state.consent;
+    const stage = !c.read ? 0 : !c.reason ? 1 : !c.passed ? 2 : 3;
+    let content = '';
+    if (stage === 0) content = `<div class="alert warning"><span>选修《机器学习》前，须完成 1 项重点推荐课程知情确认。</span></div><div class="recommended-course"><span class="status neutral">重点推荐</span><h3>农业数据采集基础</h3><p>周禾 · 3 学分 · 周五 9—10节</p></div><section class="detail-section"><h3>课程说明</h3><p>学习使用传感器采集土壤湿度、温度等农业环境数据，掌握采样记录、数据整理及质量检查方法。</p><p>教学安排：1—16 周，农生楼 B203。</p></section><div class="dialog-actions">${button('暂不办理', 'cancel-procedure', 'secondary')}${button('已阅，填写确认意见', 'consent-read', 'primary')}</div>`;
+    if (stage === 1) content = `<p class="dialog-description">请填写不接受重点推荐课程的主要原因。</p><form id="reason-form">${REASONS.map(r => `<label class="radio-row"><input type="radio" name="reason" value="${r}" required><span>${r}</span></label>`).join('')}<div class="dialog-actions">${button('暂存并关闭', 'cancel-procedure', 'secondary')}<button class="button primary" type="submit">下一步</button></div></form>`;
+    if (stage === 2) content = `<div class="compact-info"><span>已填意见</span><strong>${escape(c.reason)}</strong></div><div class="alert warning"><span>为确认意见基于充分了解，请完成课程理解核验。</span></div><form id="answer-form"><fieldset><legend>本课程的数据采集对象主要是？</legend>${[['transport', '校园交通与班车运行信息'], ['environment', '土壤湿度、温度等农业环境数据'], ['access', '校园建筑门禁信息']].map(([v, t]) => `<label class="radio-row"><input type="radio" name="answer" value="${v}" required><span>${t}</span></label>`).join('')}</fieldset><details class="fact-reference"><summary>查阅课程说明</summary><p>课程介绍：使用传感器采集土壤湿度、温度等农业环境数据，完成采样记录与质量检查。</p></details><div class="dialog-actions">${button('暂存并关闭', 'cancel-procedure', 'secondary')}<button class="button primary" type="submit">核验并继续</button></div></form>`;
+    if (stage === 3) content = `<div class="verification-ok">${icon('check')}课程理解核验已通过</div><dl class="confirmation-list"><div><dt>重点推荐课程</dt><dd>农业数据采集基础</dd></div><div><dt>确认意见</dt><dd>不接受推荐</dd></div><div><dt>主要原因</dt><dd>${escape(c.reason)}</dd></div><div><dt>申请课程</dt><dd>机器学习</dd></div></dl><div class="dialog-actions">${button('暂存并关闭', 'cancel-procedure', 'secondary')}${button('确认意见并继续选课', 'consent-confirm', 'primary')}</div>`;
+    setDialog(`<div class="dialog-heading"><div><span class="dialog-kicker">课程选修资格核验</span><h2 id="modal-title">重点推荐课程知情确认</h2></div>${closeButton()}</div><ol class="procedure-steps">${['课程说明', '确认意见', '理解核验', '登记确认'].map((name, i) => `<li class="${stage >= i ? 'active' : ''}"><span>${stage > i ? '✓' : i + 1}</span>${name}</li>`).join('')}</ol>${state.notice ? `<div class="alert warning" role="status">${escape(state.notice)}</div>` : ''}${content}`);
+  } else if (state.pending === 'withdrawal') {
+    setDialog(`<div class="dialog-heading"><div><span class="dialog-kicker">选课权益保障</span><h2 id="modal-title">撤销保障席位</h2></div>${closeButton()}</div><div class="compact-info"><span>保障课程</span><strong>农业数据采集基础 · AGRI1203</strong></div><p class="dialog-description">该席位由系统配置，用于保留跨学科修读机会。撤销前须由本人确认。</p><label class="checkbox-block"><input id="withdraw-ack" type="checkbox" ${state.withdrawalAck ? 'checked' : ''}><span>本人自愿放弃本次保障席位，按当前个人方案参加选课。</span></label><div class="dialog-actions">${button('保留席位', 'cancel-procedure', 'secondary')}<button type="button" id="hold-button" class="button danger hold-button" ${!state.withdrawalAck ? 'disabled' : ''}><i></i><span>按住 2 秒确认撤销</span></button></div><p class="hold-caption" id="hold-caption" role="status">${state.withdrawalAck ? '请持续按住确认按钮' : '请先确认本人意愿'}</p>`);
+  } else if (state.pending === 'review') {
+    const s = planSummary(state);
+    setDialog(`<div class="dialog-heading"><div><span class="dialog-kicker">第一轮 · 正选</span><h2 id="modal-title">核对选课方案</h2></div>${closeButton()}</div><div class="review-summary"><span>本次提交</span><strong>${s.count} 门 / ${s.credits} 学分</strong><span class="status success">符合学分要求</span></div><ul class="review-courses">${state.review.map(id => { const c = getCourse(id); return `<li><div><strong>${c.name}</strong><small>${c.code} · ${c.teacher} · ${timeText(c)}</small></div><span>${c.credits} 学分</span>${state.origins[id] === 'guarantee' ? '<span class="status warning">保障席位</span>' : ''}</li>`; }).join('')}</ul>${s.completeness < 100 ? `<div class="cultivation-advice"><div><h3>综合培养建议 <strong>${s.completeness}<small> / 100</small></strong></h3><p>重点推荐课程尚未保留，建议补充修读。</p></div><span class="advice-label">待完善</span></div>` : ''}<div class="dialog-actions">${s.completeness < 100 ? button('提交当前方案', 'submit', 'secondary') : button('返回调整', 'cancel-procedure', 'secondary')}${s.completeness < 100 ? button('返回完善方案', 'cancel-procedure', 'primary') : button('确认提交', 'submit', 'primary')}</div>`, 'review-dialog');
+  }
 }
-const views={home,results,detail,consent,cart,remove,confirm,success};
-function render() { document.querySelector('#hold-button')?._cleanup?.(); app.innerHTML=shell((views[state.view] || home)()); setupHold(); }
+
+function render() {
+  const focusedId = document.activeElement?.id;
+  const { page } = route();
+  app.innerHTML = shell(({ courses: coursesPage, timetable: timetablePage, results: resultsPage })[page]());
+  if (state.pending) procedureDialog();
+  else if (dialogKind?.type === 'procedure') closeDialog();
+  else if (dialogKind?.type === 'detail') courseDetails(dialogKind.id);
+  if (focusedId && document.getElementById(focusedId)) document.getElementById(focusedId).focus({ preventScroll: true });
+}
+
 function setupHold() {
   const hold = document.querySelector('#hold-button');
-  if (!hold || hold.disabled) return;
-  let start=0, frame=0, completed=false;
-  const label=hold.querySelector('span'), fill=hold.querySelector('i');
-  function stop() { cancelAnimationFrame(frame); start=0; if(!completed){fill.style.width='0';label.textContent='长按 2 秒，确认放弃保障';} }
-  function tick(now) { const elapsed=now-start; fill.style.width=Math.min(elapsed/20,100)+'%';label.textContent=`确认中… ${Math.min(elapsed/1000,2).toFixed(1)} / 2 秒`;if(elapsed>=2000){completed=true;stop();dispatch({type:'REMOVE_BACKUP',holdMs:Math.floor(elapsed)});}else frame=requestAnimationFrame(tick); }
-  function begin() { if(start || completed)return;start=performance.now();frame=requestAnimationFrame(tick); }
-  hold.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();hold.setPointerCapture(e.pointerId);begin();});
-  hold.addEventListener('pointerup',stop);hold.addEventListener('pointercancel',stop);hold.addEventListener('lostpointercapture',stop);hold.addEventListener('contextmenu',e=>e.preventDefault());
-  hold.addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();if(!e.repeat)begin();}});
-  hold.addEventListener('keyup',e=>{if(e.code==='Space'){e.preventDefault();stop();}});hold.addEventListener('blur',stop);
-  const cancelHidden = () => { if (document.hidden) stop(); };
-  document.addEventListener('visibilitychange', cancelHidden);
-  window.addEventListener('blur', stop);
-  hold._cleanup = () => { stop(); document.removeEventListener('visibilitychange', cancelHidden); window.removeEventListener('blur', stop); };
-}
-document.addEventListener('submit',e=>{
-  e.preventDefault(); const data=new FormData(e.target);
-  if(e.target.id==='search-form')dispatch({type:'SEARCH',query:String(data.get('query')||'').trim()});
-  if(e.target.id==='reason-form')dispatch({type:'CHOOSE_REASON',reason:String(data.get('reason')||'')});
-  if(e.target.id==='quiz-form')dispatch({type:'QUIZ',answer:data.get('answer')});
-});
-document.addEventListener('change',e=>{if(e.target.id==='waiver')dispatch({type:'WAIVER',checked:e.target.checked});});
-document.addEventListener('click',e=>{
-  const target=e.target.closest('[data-action]');if(!target)return;e.preventDefault();
-  const action=target.dataset.action;
-  const actions={home:{type:'NAVIGATE',view:'home'},results:{type:'NAVIGATE',view:'results'},cart:{type:'OPEN_CART'},target:{type:'OPEN_TARGET'},consent:{type:'OPEN_CONSENT'},read:{type:'READ'},reject:{type:'REJECT'},add:{type:'ADD_TARGET'},remove:{type:'OPEN_REMOVE'},review:{type:'REVIEW'},submit:{type:'SUBMIT'},'quick-search':{type:'SEARCH',query:'机器学习'}};
-  if (action==='submit') {
-    const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`;
-    actions.submit.id = 'ML-'+random.slice(0,18).toUpperCase(); actions.submit.time = new Date().toISOString();
+  if (!hold || hold.disabled) { cancelHold = () => {}; return; }
+  let started = null, frame = 0, completed = false;
+  const fill = hold.querySelector('i'), label = hold.querySelector('span');
+  function stop() {
+    cancelAnimationFrame(frame); started = null;
+    if (!completed) { fill.style.width = '0'; label.textContent = '按住 2 秒确认撤销'; }
   }
-  if(actions[action])dispatch(actions[action]);
-  else if(action==='course-info') {const c=courses.find(c=>c.id===target.dataset.course);showDialog(c.title,`<p>${c.reason}</p><p>综合适配度 ${c.score}%。本次演示的任务是只选《机器学习》；此课程可以了解，无需另办拒绝手续。</p>`);}
-  else if(action==='suggestions')showDialog('你的成长建议依然有效',`<p>我们建议保留农业数据采集课程，完善跨学科学习体验。</p><p>你已放弃该保障席位。查看建议不会重新加课；《机器学习》已满足本轮提交条件。</p>`,button('我仍按当前方案办理','close-modal'));
-  else if(action==='close-modal')modal.close();
-  else if(action==='reset')showDialog('重新开始本次体验？','<p>将清空此浏览器保存的办理进度、课表、账单与演示回执。其他浏览器不受影响。</p>',button('保留进度','close-modal','secondary')+button('清空并重新体验','confirm-reset'));
-  else if(action==='confirm-reset'){modal.close();state=initialState();storageWarning='';recovery='';persist(true);render();window.scrollTo(0,0);}
+  function tick(now) {
+    if (started === null) return;
+    const elapsed = now - started;
+    fill.style.width = Math.min(100, elapsed / 20) + '%';
+    label.textContent = `确认中 ${(elapsed / 1000).toFixed(1)} / 2 秒`;
+    if (elapsed >= 2000) { completed = true; stop(); act({ type: 'WITHDRAW_CONFIRM', holdMs: Math.floor(elapsed) }); }
+    else frame = requestAnimationFrame(tick);
+  }
+  function start() { if (started !== null || completed) return; started = performance.now(); frame = requestAnimationFrame(tick); }
+  hold.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); hold.setPointerCapture(e.pointerId); start(); });
+  for (const event of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) hold.addEventListener(event, stop);
+  hold.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) start(); } });
+  hold.addEventListener('keyup', e => { if (e.code === 'Space') { e.preventDefault(); stop(); } });
+  hold.addEventListener('contextmenu', e => e.preventDefault());
+  const hidden = () => { if (document.hidden) stop(); };
+  window.addEventListener('blur', stop); document.addEventListener('visibilitychange', hidden);
+  cancelHold = () => { stop(); window.removeEventListener('blur', stop); document.removeEventListener('visibilitychange', hidden); };
+}
+
+document.addEventListener('submit', e => {
+  if (!['filter-form', 'reason-form', 'answer-form'].includes(e.target.id)) return;
+  e.preventDefault();
+  const data = new FormData(e.target);
+  if (e.target.id === 'filter-form') {
+    const params = new URLSearchParams();
+    for (const key of ['q', 'department', 'category']) { const value = String(data.get(key) || '').trim(); if (value && value !== 'all') params.set(key, value); }
+    if (data.has('available')) params.set('available', '1');
+    if (filters().sort !== 'fit') params.set('sort', filters().sort);
+    navigate('courses', params);
+  } else if (e.target.id === 'reason-form') act({ type: 'CONSENT_REASON', reason: data.get('reason') });
+  else act({ type: 'CONSENT_ANSWER', answer: data.get('answer') });
 });
-let lastActive=performance.now();
-function accrue() {const now=performance.now();if(syncReceipt())render();if(!document.hidden&&!state.receipt){state=reduce(state,{type:'TICK',ms:Math.floor(Math.max(0,now-lastActive))});}lastActive=now;}
-setInterval(accrue,1000);
-document.addEventListener('visibilitychange',()=>{lastActive=performance.now();});
-window.addEventListener('pagehide',()=>{accrue();persist();});
-window.addEventListener('storage',e=>{
-  if(e.key!==KEY || !e.newValue)return;
-  try { const latest=localStorage.getItem(KEY);if(!latest)return;state=restore(JSON.parse(latest));recovery=state.receipt?'另一标签页已完成提交，已同步最终回执。':'已同步另一标签页的办理进度。';lastActive=performance.now();render(); }
-  catch { storageWarning='另一标签页的数据无法读取，本页仍可继续办理。';render(); }
+document.addEventListener('change', e => {
+  if (e.target.id === 'withdraw-ack') act({ type: 'WITHDRAW_ACK', checked: e.target.checked });
+  if (e.target.id === 'sort-select') { const { params } = route(); params.set('sort', e.target.value); navigate('courses', params); }
+  if (e.target.matches('#filter-form select, #filter-form input[type="checkbox"]')) document.querySelector('#filter-form').requestSubmit();
 });
+document.addEventListener('click', async e => {
+  if (e.target.closest('.skip')) {
+    e.preventDefault(); const main = document.querySelector('main'); main.setAttribute('tabindex', '-1'); main.focus(); return;
+  }
+  const target = e.target.closest('[data-action]'); if (!target) return;
+  e.preventDefault();
+  const action = target.dataset.action;
+  const id = target.dataset.course;
+  if (action === 'detail') courseDetails(id);
+  else if (action === 'close-dialog' || action === 'cancel-procedure') {
+    if (state.pending) act({ type: 'CANCEL_PROCEDURE' }); else closeDialog();
+  } else if (action === 'add' || action === 'drop') {
+    if (dialogKind?.type === 'detail') closeDialog();
+    act({ type: action.toUpperCase(), id });
+  } else if (action === 'review') act({ type: 'REVIEW' });
+  else if (action === 'consent-read') act({ type: 'CONSENT_READ' });
+  else if (action === 'consent-confirm') act({ type: 'CONSENT_CONFIRM' });
+  else if (action === 'submit') {
+    const token = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    await act({ type: 'SUBMIT', receiptId: 'XK-2026-' + token.slice(0, 8).toUpperCase() });
+    if (!state.editing) navigate('results');
+  } else if (action === 'edit') { await act({ type: 'EDIT' }); navigate('courses'); }
+  else if (action === 'goto-results') navigate('results');
+  else if (action === 'view-plan') { const plan = document.querySelector('.selection-panel'); plan?.scrollIntoView({ behavior: 'smooth', block: 'start' }); plan?.setAttribute('tabindex', '-1'); plan?.focus({ preventScroll: true }); }
+  else if (action === 'reset-filters') navigate('courses');
+  else if (action === 'dismiss') act({ type: 'DISMISS_NOTICE' });
+  else if (action === 'about') {
+    dialogKind = { type: 'about' };
+    setDialog(`<div class="dialog-heading"><h2 id="modal-title">系统信息</h2>${closeButton()}</div><dl class="confirmation-list"><div><dt>服务名称</dt><dd>本科生选课服务</dd></div><div><dt>当前版本</dt><dd>2.0</dd></div></dl><p class="dialog-description">本系统为选课交互原型。学校、学生与课程资料均为虚构，办理记录保存在当前浏览器，不连接真实教务服务。</p><div class="dialog-actions"><a class="button secondary" href="${SOURCE}" target="_blank" rel="noopener">源代码</a>${button('关闭', 'close-dialog', 'primary')}</div>`);
+  }
+});
+dialog.addEventListener('cancel', e => { e.preventDefault(); if (state.pending) act({ type: 'CANCEL_PROCEDURE' }); else closeDialog(); });
+dialog.addEventListener('close', () => { if (!suppressDialogClose && !dialog.open) { cancelHold(); dialogKind = null; } });
+window.addEventListener('hashchange', () => { closeDialog(); render(); window.scrollTo(0, 0); document.querySelector('h1')?.focus({ preventScroll: true }); });
+window.addEventListener('storage', e => {
+  if (!useSharedStorage || e.key !== STORAGE_KEY || !e.newValue) return;
+  const inputs = [...document.querySelectorAll('#filter-form input, #filter-form select, #reason-form input, #answer-form input')].map(node => ({ name: node.name, value: node.value, checked: node.checked }));
+  refreshSaved(); render();
+  for (const saved of inputs) {
+    for (const input of document.querySelectorAll('#filter-form input, #filter-form select, #reason-form input, #answer-form input')) {
+      if (input.name !== saved.name) continue;
+      if (input.type === 'radio' || input.type === 'checkbox') { if (input.value === saved.value) input.checked = saved.checked; }
+      else input.value = saved.value;
+    }
+  }
+});
+if (!location.hash) history.replaceState(null, '', '#/courses');
 render();
